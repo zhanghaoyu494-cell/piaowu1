@@ -1,0 +1,713 @@
+<template>
+	<view class="leave-approve-view">
+		<text class="section-title">审批处理</text>
+		<view class="card">
+			<view class="filter-bar">
+				<input class="apple-input search-input" v-model="filter.keyword" placeholder="搜索申请人/目标人/原因" />
+				<button class="filter-btn" @click="loadList">搜索</button>
+			</view>
+
+			<view class="filter-options">
+				<view class="status-tabs">
+					<view class="status-tab" :class="{ active: filter.approval_status === -1 }" @click="setStatus(-1)">
+						<text class="status-tab-text">全部</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.approval_status === 0 }" @click="setStatus(0)">
+						<text class="status-tab-text">待审批</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.approval_status === 1 }" @click="setStatus(1)">
+						<text class="status-tab-text">已通过</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.approval_status === 2 }" @click="setStatus(2)">
+						<text class="status-tab-text">已拒绝</text>
+					</view>
+				</view>
+				<button class="apple-btn apple-btn-small" hover-class="apple-btn-hover" @click="loadList">刷新</button>
+			</view>
+
+			<view v-if="items.length === 0" class="empty-state">
+				<text class="empty-text">暂无申请数据</text>
+			</view>
+
+			<view class="split">
+				<view class="left">
+					<scroll-view scroll-y="true" class="list-scroll">
+						<view v-for="it in items" :key="it.apply_id" class="list-item" :class="{ selected: selectedApplyId === it.apply_id }" @click="selectItem(it)">
+							<view class="item-header">
+								<text class="item-title">#{{ it.apply_id }} {{ it.cs_name || it.cs_id }}</text>
+								<text class="badge" :class="badgeClass(it.approval_status)">{{ statusText(it.approval_status) }}</text>
+							</view>
+							<text class="item-sub">{{ applyTypeText(it.apply_type) }} · {{ it.target_date }} · {{ it.shift_name || ('班次' + it.shift_id) }}</text>
+							<text class="item-reason">{{ it.reason || '（无原因）' }}</text>
+						</view>
+					</scroll-view>
+				</view>
+
+				<view class="right">
+					<scroll-view scroll-y="true" class="detail-scroll">
+						<view v-if="detail" class="detail-card">
+							<view class="detail-header">
+								<text class="detail-title">申请详情</text>
+								<button class="audit-log-btn" @click="loadAuditLog">查看审计日志</button>
+							</view>
+
+							<view class="kv">
+								<text class="k">申请ID</text>
+								<text class="v">#{{ detail.apply_id }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">申请类型</text>
+								<text class="v">{{ applyTypeText(detail.apply_type) }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">日期/班次</text>
+								<text class="v">{{ formatDateRange(detail) }} · {{ detail.shift_name || ('班次' + detail.shift_id) }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">申请人</text>
+								<text class="v">{{ detail.cs_name || '-' }}（{{ detail.cs_id }}）</text>
+							</view>
+							<view class="kv">
+								<text class="k">部门/班组</text>
+								<text class="v">{{ (detail.dept_id || '-') + ' / ' + (detail.team_id || '-') }}</text>
+							</view>
+							<view class="kv" v-if="detail.apply_type === 1">
+								<text class="k">目标客服</text>
+								<text class="v">{{ detail.target_cs_name || '-' }}（{{ detail.target_cs_id || '-' }}）</text>
+							</view>
+							<view class="kv">
+								<text class="k">申请原因</text>
+								<text class="v">{{ detail.reason || '（无）' }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">提交时间</text>
+								<text class="v">{{ detail.create_time || '-' }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">审批状态</text>
+								<text class="v">{{ statusText(detail.approval_status) }}</text>
+							</view>
+							<view class="kv" v-if="detail.approval_status !== 0">
+								<text class="k">审批人</text>
+								<text class="v">{{ detail.approver_name || detail.approver_id || '-' }}</text>
+							</view>
+							<view class="kv" v-if="detail.approval_status !== 0">
+								<text class="k">审批时间</text>
+								<text class="v">{{ detail.approval_time || '-' }}</text>
+							</view>
+							<view class="kv" v-if="detail.approval_status !== 0 && detail.approval_remark">
+								<text class="k">审批备注</text>
+								<text class="v">{{ detail.approval_remark }}</text>
+							</view>
+
+							<view class="divider"></view>
+
+							<!-- 审计日志展示区域 -->
+							<view v-if="auditLogs.length > 0" class="audit-log-section">
+								<text class="detail-title">审计日志</text>
+								<view class="audit-timeline">
+									<view v-for="(log, idx) in auditLogs" :key="idx" class="audit-item">
+										<view class="audit-dot" :class="getAuditDotClass(log.action)"></view>
+										<view class="audit-content">
+											<view class="audit-header">
+												<text class="audit-action">{{ getAuditActionText(log.action) }}</text>
+												<text class="audit-time">{{ log.create_time }}</text>
+											</view>
+											<text class="audit-operator">操作人: {{ log.operator_name || log.operator_id }}</text>
+											<text v-if="log.remark" class="audit-remark">备注: {{ log.remark }}</text>
+											<text v-if="log.details" class="audit-details">{{ log.details }}</text>
+										</view>
+									</view>
+								</view>
+							</view>
+
+							<view class="divider"></view>
+
+							<text class="detail-title">执行审批</text>
+							<view class="field">
+								<text class="form-label">审批备注（可选）</text>
+								<input class="apple-input" v-model="approve.approval_remark" placeholder="填写审批意见或备注" />
+							</view>
+							<view class="field">
+								<text class="form-label">审批结果</text>
+								<view class="approve-actions">
+									<button class="approve-btn pass" :class="{ selected: approveStatusIndex === 0 }" @click="setApproveStatus(0)">通过</button>
+									<button class="approve-btn reject" :class="{ selected: approveStatusIndex === 1 }" @click="setApproveStatus(1)">拒绝</button>
+								</view>
+							</view>
+							<button class="apple-btn" style="background-color: #34c759;" :disabled="detail.approval_status !== 0" @click="submitApprove">
+								{{ detail.approval_status === 0 ? '提交审批' : '已审批' }}
+							</button>
+						</view>
+					</scroll-view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script>
+	import { api } from '../../common/api.js'
+	import { ensureOk } from '../../common/request.js'
+
+	export default {
+		data() {
+			return {
+				filter: {
+					approval_status: 0,
+					keyword: ''
+				},
+				items: [],
+				selectedApplyId: 0,
+				detail: null,
+				approveStatusIndex: 0,
+				approve: {
+					approval_remark: ''
+				},
+				auditLogs: [] // 审计日志数据
+			}
+		},
+		mounted() {
+			this.loadList()
+		},
+		methods: {
+			statusText(s) {
+				if (s === 0) return '待审批'
+				if (s === 1) return '已通过'
+				if (s === 2) return '已拒绝'
+				return '未知'
+			},
+			badgeClass(s) {
+				if (s === 0) return 'badge-pending'
+				if (s === 1) return 'badge-pass'
+				if (s === 2) return 'badge-reject'
+				return 'badge-unknown'
+			},
+			applyTypeText(t) {
+				return t === 1 ? '调班' : '请假'
+			},
+			setStatus(s) {
+				this.filter.approval_status = s
+				this.selectedApplyId = 0
+				this.detail = null
+				this.loadList()
+			},
+			setApproveStatus(index) {
+				this.approveStatusIndex = index
+			},
+			// 格式化日期范围显示
+			formatDateRange(item) {
+				if (!item) return '-'
+				// 如果有start_date和end_date，显示范围
+				if (item.start_date && item.end_date) {
+					const periodText = (p) => {
+						if (p === 0) return '全天'
+						if (p === 1) return '上午'
+						if (p === 2) return '下午'
+						return ''
+					}
+					if (item.start_date === item.end_date) {
+						// 同一天
+						if (item.start_period === 0) {
+							return item.start_date + ' 全天'
+						}
+						return item.start_date + ' ' + periodText(item.start_period)
+					}
+					// 不同天
+					return item.start_date + periodText(item.start_period) + ' ~ ' + item.end_date + periodText(item.end_period)
+				}
+				// 兼容旧数据：只有target_date
+				return item.target_date || '-'
+			},
+			async loadList() {
+				try {
+					uni.showLoading({ title: '加载中' })
+					const res = await api.listLeaveTransfer({
+						approval_status: this.filter.approval_status,
+						keyword: (this.filter.keyword || '').trim(),
+						page: 1,
+						page_size: 50
+					})
+					uni.hideLoading()
+					ensureOk(res)
+					this.items = res.items || []
+					if (this.selectedApplyId > 0) {
+						const hit = this.items.find(x => x.apply_id === this.selectedApplyId)
+						if (!hit) {
+							this.selectedApplyId = 0
+							this.detail = null
+						}
+					}
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '加载失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			},
+			async selectItem(it) {
+				if (!it || !it.apply_id) return
+				this.selectedApplyId = it.apply_id
+				this.detail = null
+				this.auditLogs = [] // 清空审计日志
+
+				try {
+					uni.showLoading({ title: '加载详情' })
+					const res = await api.getLeaveTransfer(it.apply_id)
+					uni.hideLoading()
+					ensureOk(res)
+					this.detail = res.item || null
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '获取详情失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			},
+			// 加载审计日志
+			async loadAuditLog() {
+				if (!this.detail || !this.detail.apply_id) {
+					uni.showToast({ title: '请先选择申请', icon: 'none' })
+					return
+				}
+
+				try {
+					uni.showLoading({ title: '加载中' })
+					const res = await api.getLeaveAuditLog(this.detail.apply_id)
+					uni.hideLoading()
+					ensureOk(res)
+					this.auditLogs = res.logs || []
+					if (this.auditLogs.length === 0) {
+						uni.showToast({ title: '暂无审计日志', icon: 'none' })
+					} else {
+						uni.showToast({ title: `加载了 ${this.auditLogs.length} 条记录` })
+					}
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '加载审计日志失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			},
+			// 获取审计动作文本
+			getAuditActionText(action) {
+				const map = {
+					'CREATE': '📝 创建申请',
+					'SUBMIT': '🚀 提交申请',
+					'APPROVE': '✅ 审批通过',
+					'REJECT': '❌ 审批拒绝',
+					'CANCEL': '🚫 取消申请',
+					'UPDATE': '✏️ 修改申请'
+				}
+				return map[action] || action
+			},
+			// 获取审计点样式
+			getAuditDotClass(action) {
+				if (action === 'APPROVE') return 'dot-success'
+				if (action === 'REJECT') return 'dot-error'
+				if (action === 'CANCEL') return 'dot-warning'
+				return 'dot-default'
+			},
+			async submitApprove() {
+				if (!this.detail || !this.detail.apply_id) {
+					uni.showToast({ title: '请先选择申请', icon: 'none' })
+					return
+				}
+				if (this.detail.approval_status !== 0) {
+					uni.showToast({ title: '该申请已审批', icon: 'none' })
+					return
+				}
+
+				const approvalRemark = (this.approve.approval_remark || '').trim()
+				const status = this.approveStatusIndex + 1
+
+				try {
+					uni.showLoading({ title: '处理中' })
+					// 后端会自动从 token 获取审批人信息
+					const res = await api.approveLeaveTransfer({
+						apply_id: this.detail.apply_id,
+						approval_status: status,
+						approval_remark: approvalRemark
+					})
+					uni.hideLoading()
+
+					if (res.base_resp && res.base_resp.code === 409) {
+						uni.showModal({
+							title: '审批失败',
+							content: '排班冲突：' + res.base_resp.msg,
+							showCancel: false
+						})
+						return
+					}
+
+					ensureOk(res)
+					uni.showToast({ title: '审批成功' })
+
+					await this.selectItem({ apply_id: this.detail.apply_id })
+					await this.loadList()
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '审批失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			}
+		}
+	}
+</script>
+
+<style>
+	.filter-bar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.search-input {
+		flex: 1;
+		margin-right: 10px;
+	}
+
+	.filter-btn {
+		height: 44px;
+		line-height: 44px;
+		padding: 0 16px;
+		background-color: #0071e3;
+		color: #ffffff;
+		border-radius: 12px;
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	.filter-options {
+		margin-top: 12px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.status-tabs {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.status-tab {
+		height: 32px;
+		padding: 0 12px;
+		border-radius: 10px;
+		background-color: #f5f5f7;
+		justify-content: center;
+		margin-right: 8px;
+	}
+
+	.status-tab.active {
+		background-color: #e8f3ff;
+	}
+
+	.status-tab-text {
+		font-size: 13px;
+		color: #1d1d1f;
+	}
+
+	.split {
+		margin-top: 16px;
+		flex-direction: row;
+		height: 520px;
+	}
+
+	.left {
+		width: 48%;
+		border-right: 1px solid #ebedf0;
+		padding-right: 12px;
+	}
+
+	.right {
+		width: 52%;
+		padding-left: 12px;
+	}
+
+	.list-scroll {
+		height: 520px;
+	}
+
+	.detail-scroll {
+		height: 520px;
+	}
+
+	.list-item {
+		padding: 12px;
+		border-radius: 12px;
+		background-color: #ffffff;
+		border: 1px solid #f0f0f0;
+		margin-bottom: 10px;
+		cursor: pointer;
+	}
+
+	.list-item.selected {
+		border-color: #0071e3;
+		background-color: #f5faff;
+	}
+
+	.item-header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.item-title {
+		font-size: 15px;
+		font-weight: 600;
+		color: #1d1d1f;
+	}
+
+	.item-sub {
+		margin-top: 6px;
+		font-size: 13px;
+		color: #6b7280;
+	}
+
+	.item-reason {
+		margin-top: 8px;
+		font-size: 13px;
+		color: #1d1d1f;
+	}
+
+	.badge {
+		height: 22px;
+		line-height: 22px;
+		padding: 0 10px;
+		border-radius: 11px;
+		font-size: 12px;
+		color: #ffffff;
+	}
+
+	.badge-pending {
+		background-color: #86909c;
+	}
+
+	.badge-pass {
+		background-color: #34c759;
+	}
+
+	.badge-reject {
+		background-color: #ff3b30;
+	}
+
+	.badge-unknown {
+		background-color: #111827;
+	}
+
+	.detail-card {
+		background-color: #ffffff;
+		border: 1px solid #f0f0f0;
+		border-radius: 12px;
+		padding: 14px;
+	}
+
+	.detail-header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 10px;
+	}
+
+	.audit-log-btn {
+		height: 32px;
+		line-height: 32px;
+		padding: 0 12px;
+		background-color: #f5f5f7;
+		color: #0071e3;
+		border-radius: 8px;
+		font-size: 13px;
+		font-weight: 500;
+	}
+
+	.audit-log-btn:active {
+		background-color: #e5e5e7;
+	}
+
+	/* 审计日志区域 */
+	.audit-log-section {
+		margin-top: 12px;
+	}
+
+	.audit-timeline {
+		padding-left: 12px;
+		margin-top: 10px;
+	}
+
+	.audit-item {
+		flex-direction: row;
+		margin-bottom: 16px;
+		position: relative;
+	}
+
+	.audit-item:last-child {
+		margin-bottom: 0;
+	}
+
+	.audit-dot {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		margin-right: 10px;
+		margin-top: 4px;
+		flex-shrink: 0;
+	}
+
+	.dot-default {
+		background-color: #86868b;
+	}
+
+	.dot-success {
+		background-color: #34c759;
+		box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.1);
+	}
+
+	.dot-error {
+		background-color: #ff3b30;
+		box-shadow: 0 0 0 4px rgba(255, 59, 48, 0.1);
+	}
+
+	.dot-warning {
+		background-color: #ffcc00;
+		box-shadow: 0 0 0 4px rgba(255, 204, 0, 0.1);
+	}
+
+	.audit-content {
+		flex: 1;
+		background-color: #f8f9fa;
+		border-radius: 8px;
+		padding: 10px;
+	}
+
+	.audit-header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 6px;
+	}
+
+	.audit-action {
+		font-size: 14px;
+		font-weight: 600;
+		color: #1d1d1f;
+	}
+
+	.audit-time {
+		font-size: 12px;
+		color: #86868b;
+	}
+
+	.audit-operator {
+		font-size: 13px;
+		color: #6b7280;
+		margin-bottom: 4px;
+	}
+
+	.audit-remark {
+		font-size: 13px;
+		color: #1d1d1f;
+		margin-top: 4px;
+		line-height: 18px;
+	}
+
+	.audit-details {
+		font-size: 12px;
+		color: #86868b;
+		margin-top: 4px;
+		line-height: 16px;
+	}
+
+	.kv {
+		flex-direction: row;
+		justify-content: space-between;
+		margin-bottom: 8px;
+	}
+
+	.k {
+		font-size: 13px;
+		color: #6b7280;
+	}
+
+	.v {
+		font-size: 13px;
+		color: #1d1d1f;
+		max-width: 70%;
+		text-align: right;
+	}
+
+	.divider {
+		height: 1px;
+		background-color: #ebedf0;
+		margin: 12px 0;
+	}
+
+	.empty-detail {
+		height: 520px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.empty-state {
+		margin-top: 20px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.empty-text {
+		color: #86868b;
+		font-size: 13px;
+	}
+
+	.field {
+		margin-bottom: 14px;
+	}
+
+	.approve-actions {
+		flex-direction: row;
+		justify-content: space-between;
+	}
+
+	.approve-btn {
+		flex: 1;
+		height: 44px;
+		line-height: 44px;
+		text-align: center;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 500;
+		border: 1px solid transparent;
+		margin: 0 4px;
+	}
+
+	.approve-btn.pass {
+		background-color: #f5f5f7;
+		color: #34c759;
+	}
+
+	.approve-btn.pass.selected {
+		background-color: #e8f9ec;
+		border-color: #34c759;
+		font-weight: 600;
+	}
+
+	.approve-btn.reject {
+		background-color: #f5f5f7;
+		color: #ff3b30;
+	}
+
+	.approve-btn.reject.selected {
+		background-color: #ffebe9;
+		border-color: #ff3b30;
+		font-weight: 600;
+	}
+</style>

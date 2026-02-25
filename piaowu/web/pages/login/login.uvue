@@ -1,0 +1,285 @@
+<template>
+	<view class="login-page">
+		<!-- 登录卡片 -->
+		<view class="login-card">
+			<!-- Logo和标题 -->
+			<view class="login-header">
+				<image class="logo" src="/static/PixPin_2026-01-13_19-52-32.png"></image>
+				<text class="title">客服系统</text>
+				<text class="subtitle">欢迎回来，请登录您的账号</text>
+			</view>
+
+			<!-- 登录表单 -->
+			<view class="login-form">
+				<!-- 用户名输入框 -->
+				<view class="input-group">
+					<text class="input-label">用户名</text>
+					<view class="input-wrapper">
+						<text class="input-icon">👤</text>
+						<input 
+							class="input-field" 
+							type="text" 
+							placeholder="请输入用户名" 
+							v-model="userName"
+							@confirm="handleLogin"
+						/>
+					</view>
+				</view>
+
+				<!-- 密码输入框 -->
+				<view class="input-group">
+					<text class="input-label">密码</text>
+					<view class="input-wrapper">
+						<text class="input-icon">🔒</text>
+						<input 
+							class="input-field" 
+							type="password" 
+							placeholder="请输入密码" 
+							v-model="password"
+							@confirm="handleLogin"
+						/>
+					</view>
+				</view>
+
+				<!-- 登录按钮 -->
+				<view class="login-btn" :class="{ disabled: loading }" @click="handleLogin">
+					<text class="btn-text">{{ loading ? '登录中...' : '登 录' }}</text>
+				</view>
+
+				<!-- 提示信息 -->
+				<view class="tips">
+					<text class="tip-text">默认管理员账号: admin / admin123</text>
+				</view>
+				
+				<view class="tips" style="margin-top: 10px;">
+					<text class="tip-text" style="color: #667eea; cursor: pointer;" @click="toRegister">还没有账号？点击注册客服</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- 版权信息 -->
+		<view class="footer">
+			<text class="copyright">© 2026 客服系统 All Rights Reserved</text>
+		</view>
+	</view>
+</template>
+
+<script>
+	import { api } from '../../common/api.js'
+	import { getBaseResp } from '../../common/request.js'
+
+	export default {
+		data() {
+			return {
+				userName: '',
+				password: '',
+				loading: false
+			}
+		},
+		onLoad() {
+			// 检查是否已登录
+			const token = uni.getStorageSync('token')
+			if (token) {
+				// 已登录，跳转到首页
+				uni.redirectTo({ url: '/pages/index/index' })
+			}
+		},
+		methods: {
+			async handleLogin() {
+				// 防止重复提交
+				if (this.loading) return
+
+				// 表单校验
+				const userName = this.userName.trim()
+				const password = this.password.trim()
+				if (!userName) {
+					uni.showToast({ title: '请输入用户名', icon: 'none' })
+					return
+				}
+				if (!password) {
+					uni.showToast({ title: '请输入密码', icon: 'none' })
+					return
+				}
+
+				this.loading = true
+				try {
+					// 调用登录接口
+					const res = await api.login(userName, password)
+					const base = getBaseResp(res)
+
+					if (base.code === 0 && res.data) {
+						// 登录成功，保存token和用户信息
+						uni.setStorageSync('token', res.data.token)
+						uni.setStorageSync('userInfo', JSON.stringify(res.data.user_info))
+						uni.setStorageSync('isLogin', 'true')
+						uni.setStorageSync('roleCode', res.data.user_info.role_code)
+
+						uni.showToast({ title: '登录成功', icon: 'success' })
+						
+						// 跳转到首页
+						setTimeout(() => {
+							uni.redirectTo({ url: '/pages/index/index' })
+						}, 500)
+					} else {
+						// 登录失败
+						uni.showToast({ title: base.msg || '登录失败', icon: 'none' })
+					}
+				} catch (err) {
+					console.error('登录失败:', err)
+					uni.showToast({ title: '网络错误，请重试', icon: 'none' })
+				} finally {
+					this.loading = false
+				}
+			},
+			toRegister() {
+				uni.redirectTo({ url: '/pages/register/register' })
+			}
+		}
+	}
+</script>
+
+<style>
+	.login-page {
+		width: 100%;
+		height: 100vh;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.login-card {
+		width: 420px;
+		background-color: #ffffff;
+		border-radius: 16px;
+		padding: 48px 40px;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+	}
+
+	.login-header {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		margin-bottom: 40px;
+	}
+
+	.logo {
+		width: 64px;
+		height: 64px;
+		margin-bottom: 16px;
+	}
+
+	.title {
+		font-size: 28px;
+		font-weight: 700;
+		color: #1d1d1f;
+		margin-bottom: 8px;
+	}
+
+	.subtitle {
+		font-size: 14px;
+		color: #86909c;
+	}
+
+	.login-form {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.input-group {
+		margin-bottom: 24px;
+	}
+
+	.input-label {
+		font-size: 14px;
+		font-weight: 500;
+		color: #4e5969;
+		margin-bottom: 8px;
+	}
+
+	.input-wrapper {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		background-color: #f7f8fa;
+		border-radius: 8px;
+		padding: 0 16px;
+		height: 48px;
+		border: 1px solid #e5e6eb;
+		transition: border-color 0.2s;
+	}
+
+	.input-wrapper:focus-within {
+		border-color: #667eea;
+		background-color: #ffffff;
+	}
+
+	.input-icon {
+		font-size: 18px;
+		margin-right: 12px;
+	}
+
+	.input-field {
+		flex: 1;
+		height: 48px;
+		font-size: 15px;
+		color: #1d1d1f;
+		background-color: transparent;
+		border: none;
+	}
+
+	.login-btn {
+		height: 48px;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		border-radius: 8px;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		margin-top: 8px;
+		cursor: pointer;
+		transition: opacity 0.2s, transform 0.2s;
+	}
+
+	.login-btn:hover {
+		opacity: 0.9;
+		transform: translateY(-1px);
+	}
+
+	.login-btn:active {
+		transform: translateY(0);
+	}
+
+	.login-btn.disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.btn-text {
+		font-size: 16px;
+		font-weight: 600;
+		color: #ffffff;
+		letter-spacing: 2px;
+	}
+
+	.tips {
+		margin-top: 24px;
+		display: flex;
+		justify-content: center;
+	}
+
+	.tip-text {
+		font-size: 12px;
+		color: #c9cdd4;
+	}
+
+	.footer {
+		position: fixed;
+		bottom: 32px;
+	}
+
+	.copyright {
+		font-size: 12px;
+		color: rgba(255, 255, 255, 0.6);
+	}
+</style>

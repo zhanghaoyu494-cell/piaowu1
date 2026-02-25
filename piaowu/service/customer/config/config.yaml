@@ -1,0 +1,36 @@
+server:
+  name: customer-service
+  address: 0.0.0.0:8888
+
+mysql:
+  host: mysql
+  port: 3306
+  user: root
+  password: Zhyzhy666888
+  database: ccc
+  charset: utf8mb4
+  parse_time: true
+  loc: Local
+  max_idle_conns: 10
+  max_open_conns: 100
+
+redis:
+  host: redis
+  port: 6379
+  password: "Zhyzhy666888"
+  db: 0
+
+# 链路追踪配置
+# Jaeger 端口说明:
+#   16686 - Jaeger Web UI
+#   4317  - OTLP gRPC (OpenTelemetry 推荐)
+#   4318  - OTLP HTTP (备用)
+#   14268 - Jaeger Collector HTTP (旧版)
+trace:
+  enabled: false                                        # 是否启用链路追踪
+  service_name: customer-service                        # 服务名（显示在 Jaeger UI）
+  jaeger_enabled: false                                  # 是否启用 Jaeger 导出
+  endpoint: "http://jaeger:4318/v1/traces"           # OTLP HTTP 端点 (Jaeger 4318 端口)
+  sample_rate: 0.1                                      # 采样率 (0.0~1.0)，0.1 表示 10% 采样
+  batch_size: 100                                       # 批量发送大小
+  flush_interval: 5s                                    # 刷新间隔

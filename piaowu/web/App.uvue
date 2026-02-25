@@ -1,0 +1,121 @@
+<script lang="uts">
+  // #ifdef APP-ANDROID || APP-HARMONY
+	let firstBackTime = 0
+  // #endif
+	export default {
+		onLaunch: function () {
+			console.log('App Launch')
+		},
+		onShow: function () {
+			console.log('App Show')
+		},
+		onHide: function () {
+			console.log('App Hide')
+		},
+		// #ifdef APP-ANDROID || APP-HARMONY
+		onLastPageBackPress: function () {
+			console.log('App LastPageBackPress')
+			if (firstBackTime == 0) {
+				uni.showToast({
+					title: '再按一次退出应用',
+					position: 'bottom',
+				})
+				firstBackTime = Date.now()
+				setTimeout(() => {
+					firstBackTime = 0
+				}, 2000)
+			} else if (Date.now() - firstBackTime < 2000) {
+				firstBackTime = Date.now()
+				uni.exit()
+			}
+		},
+		// #endif
+		onExit: function () {
+			console.log('App Exit')
+		},
+	}
+</script>
+
+<style>
+	/*每个页面公共css */
+	.uni-row {
+		flex-direction: row;
+	}
+
+	.uni-column {
+		flex-direction: column;
+	}
+
+	/* Apple Style Global Reset & Variables */
+	page {
+		background-color: #f5f5f7;
+		font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+		color: #1d1d1f;
+		font-size: 16px;
+		line-height: 1.47059;
+	}
+
+	.page-container {
+		padding: 40px 20px;
+		max-width: 800px;
+		margin: 0 auto;
+	}
+
+	.section-title {
+		font-size: 24px;
+		font-weight: 600;
+		margin-bottom: 24px;
+		color: #1d1d1f;
+	}
+
+	.card {
+		background-color: #ffffff;
+		border-radius: 18px;
+		padding: 24px;
+		margin-bottom: 20px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+	}
+
+	.apple-btn {
+		background-color: #0071e3;
+		color: #ffffff;
+		border-radius: 980px; /* Pill shape */
+		font-size: 17px;
+		font-weight: 500;
+		padding: 12px 24px;
+		border: none;
+		text-align: center;
+	}
+	
+	.apple-btn:active {
+		opacity: 0.8;
+	}
+	
+	.apple-btn-hover {
+		opacity: 0.8;
+	}
+
+	.apple-input {
+		background-color: #f5f5f7;
+		border-radius: 12px;
+		padding: 14px 16px;
+		font-size: 17px;
+		color: #1d1d1f;
+		border: 1px solid transparent;
+		transition: all 0.2s;
+	}
+
+	.apple-input:focus {
+		background-color: #ffffff;
+		border-color: #0071e3;
+		box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
+	}
+
+	.form-label {
+		font-size: 14px;
+		color: #86868b;
+		margin-bottom: 8px;
+		margin-left: 4px;
+		font-weight: 500;
+	}
+</style>

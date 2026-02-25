@@ -1,0 +1,487 @@
+﻿<template>
+	<view class="page-container">
+		<text class="section-title">{{ editingShift ? '编辑班次' : '新增班次' }}</text>
+		<view class="card">
+			<view class="form-group">
+				<view class="field">
+					<text class="form-label">班次名称</text>
+					<input class="apple-input" v-model="form.shift_name" placeholder="例如：早班" />
+				</view>
+				
+				<view class="row-group">
+					<view class="field half">
+						<text class="form-label">开始时间</text>
+						<picker mode="time" :value="form.start_time_hhmm" @change="onStartTimeChange">
+							<view class="apple-input picker-text">{{ form.start_time_hhmm || '选择时间' }}</view>
+						</picker>
+					</view>
+					<view class="field half">
+						<text class="form-label">结束时间</text>
+						<picker mode="time" :value="form.end_time_hhmm" @change="onEndTimeChange">
+							<view class="apple-input picker-text">{{ form.end_time_hhmm || '选择时间' }}</view>
+						</picker>
+					</view>
+				</view>
+
+				<view class="field">
+					<text class="form-label">最少人数</text>
+					<input class="apple-input" type="number" v-model="form.min_staff_str" placeholder="例如：5" />
+				</view>
+
+				<view class="field switch-row">
+					<text class="form-label switch-label">节假日班次</text>
+					<switch color="#0071e3" :checked="form.is_holiday === 1" @change="onHolidayChange"></switch>
+				</view>
+
+				<view class="btn-row">
+					<button class="apple-btn" @click="submit">{{ editingShift ? '保存修改' : '保存班次' }}</button>
+					<button v-if="editingShift" class="cancel-btn" @click="cancelEdit">取消</button>
+				</view>
+			</view>
+		</view>
+
+		<text class="section-title" style="margin-top: 40px;">班次列表</text>
+		<view class="card">
+			<view class="filter-bar">
+				<input class="apple-input search-input" v-model="filter.shift_name" placeholder="搜索班次名称" />
+				<button class="filter-btn" @click="loadShifts">搜索</button>
+			</view>
+			
+			<view class="filter-options">
+				<view class="switch-row compact">
+					<text class="filter-label">仅显示节假日</text>
+					<switch color="#0071e3" style="transform: scale(0.8);" :checked="filter.only_holiday" @change="onOnlyHolidayChange"></switch>
+				</view>
+				<text class="reset-link" @click="resetFilter">重置筛选</text>
+			</view>
+
+			<view v-if="shifts.length === 0" class="empty-state">
+				<text class="empty-text">暂无班次数据</text>
+			</view>
+			
+			<view class="list-container">
+				<view v-for="s in shifts" :key="s.shift_id" class="list-item">
+					<view class="item-main">
+						<view class="item-header">
+							<text class="item-title">{{ s.shift_name }}</text>
+							<text class="holiday-badge" v-if="s.is_holiday === 1">节假日</text>
+						</view>
+						<text class="item-subtitle">{{ s.start_time }} - {{ s.end_time }}</text>
+					</view>
+					<view class="item-meta">
+						<text class="meta-label">最少人数</text>
+						<text class="meta-value">{{ s.min_staff }}</text>
+					</view>
+					<view class="item-actions">
+						<text class="action-btn edit-btn" @click="startEdit(s)">编辑</text>
+						<text class="action-btn delete-btn" @click="confirmDelete(s)">删除</text>
+					</view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script>
+	// 系统配置页：班次配置（对应后端路由 /api/shift/create、/api/shift/list）
+	import { api } from '../../common/api.js'
+	import { ensureOk } from '../../common/request.js'
+
+	function hhmmToHHMMSS(v) {
+		if (!v) return ''
+		const s = String(v).trim()
+		if (!s) return ''
+		if (s.length === 5) return s + ':00'
+		return s
+	}
+
+	function compareHHMM(a, b) {
+		if (!a || !b) return 0
+		const aa = a.split(':')
+		const bb = b.split(':')
+		const am = parseInt(aa[0] || '0', 10) * 60 + parseInt(aa[1] || '0', 10)
+		const bm = parseInt(bb[0] || '0', 10) * 60 + parseInt(bb[1] || '0', 10)
+		return am - bm
+	}
+
+	export default {
+		data() {
+			return {
+				form: {
+					shift_name: '',
+					start_time_hhmm: '',
+					end_time_hhmm: '',
+					min_staff_str: '1',
+					is_holiday: 0
+				},
+				filter: {
+					shift_name: '',
+					only_holiday: false
+				},
+				shifts: [],
+				editingShift: null // 当前正在编辑的班次
+			}
+		},
+		onLoad() {
+			this.loadShifts()
+		},
+		methods: {
+			onStartTimeChange(e) {
+				this.form.start_time_hhmm = e.detail.value
+			},
+			onEndTimeChange(e) {
+				this.form.end_time_hhmm = e.detail.value
+			},
+			onHolidayChange(e) {
+				this.form.is_holiday = e.detail.value ? 1 : 0
+			},
+			onOnlyHolidayChange(e) {
+				this.filter.only_holiday = !!e.detail.value
+			},
+			resetFilter() {
+				this.filter.shift_name = ''
+				this.filter.only_holiday = false
+				this.loadShifts()
+			},
+			// 开始编辑班次
+			startEdit(shift) {
+				this.editingShift = shift
+				this.form.shift_name = shift.shift_name || ''
+				// 时间格式处理：去掉秒
+				let st = shift.start_time || ''
+				let et = shift.end_time || ''
+				if (st.length > 5) st = st.substring(0, 5)
+				if (et.length > 5) et = et.substring(0, 5)
+				this.form.start_time_hhmm = st
+				this.form.end_time_hhmm = et
+				this.form.min_staff_str = String(shift.min_staff || 1)
+				this.form.is_holiday = shift.is_holiday || 0
+				// 滚动到页面顶部
+				uni.pageScrollTo({ scrollTop: 0, duration: 300 })
+			},
+			// 取消编辑
+			cancelEdit() {
+				this.editingShift = null
+				this.resetForm()
+			},
+			// 重置表单
+			resetForm() {
+				this.form.shift_name = ''
+				this.form.start_time_hhmm = ''
+				this.form.end_time_hhmm = ''
+				this.form.min_staff_str = '1'
+				this.form.is_holiday = 0
+			},
+			// 确认删除班次
+			confirmDelete(shift) {
+				uni.showModal({
+					title: '确认删除',
+					content: '确定要删除班次「' + shift.shift_name + '」吗？',
+					success: async (res) => {
+						if (res.confirm) {
+							await this.deleteShift(shift.shift_id)
+						}
+					}
+				})
+			},
+			// 删除班次
+			async deleteShift(shiftId) {
+				try {
+					uni.showLoading({ title: '删除中' })
+					const res = await api.deleteShiftConfig(shiftId)
+					uni.hideLoading()
+					ensureOk(res)
+					uni.showToast({ title: '删除成功' })
+					this.loadShifts()
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '错误',
+						content: e.errMsg || '删除失败',
+						showCancel: false
+					})
+				}
+			},
+			async submit() {
+				const name = (this.form.shift_name || '').trim()
+				const st = (this.form.start_time_hhmm || '').trim()
+				const et = (this.form.end_time_hhmm || '').trim()
+				const minStaff = parseInt((this.form.min_staff_str || '').trim(), 10)
+
+				if (!name) {
+					uni.showToast({ title: '请输入班次名称', icon: 'none' })
+					return
+				}
+				if (!st || !et) {
+					uni.showToast({ title: '请选择开始/结束时间', icon: 'none' })
+					return
+				}
+				if (compareHHMM(et, st) <= 0) {
+					uni.showToast({ title: '结束时间必须大于开始时间', icon: 'none' })
+					return
+				}
+				if (Number.isNaN(minStaff) || minStaff < 0) {
+					uni.showToast({ title: '最少人数填写不正确', icon: 'none' })
+					return
+				}
+
+				try {
+					uni.showLoading({ title: '保存中' })
+					let res
+					if (this.editingShift) {
+						// 编辑模式：调用更新接口
+						res = await api.updateShiftConfig({
+							shift_id: this.editingShift.shift_id,
+							shift_name: name,
+							start_time: hhmmToHHMMSS(st),
+							end_time: hhmmToHHMMSS(et),
+							min_staff: minStaff,
+							is_holiday: this.form.is_holiday,
+							create_by: 'ADMIN'
+						})
+					} else {
+						// 新增模式：调用创建接口
+						res = await api.createShiftConfig({
+							shift_name: name,
+							start_time: hhmmToHHMMSS(st),
+							end_time: hhmmToHHMMSS(et),
+							min_staff: minStaff,
+							is_holiday: this.form.is_holiday,
+							create_by: 'ADMIN'
+						})
+					}
+					uni.hideLoading()
+					ensureOk(res)
+					uni.showToast({ title: '保存成功' })
+					this.loadShifts()
+					// 重置表单和编辑状态
+					this.editingShift = null
+					this.resetForm()
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '错误',
+						content: e.errMsg || '保存失败',
+						showCancel: false
+					})
+				}
+			},
+			async loadShifts() {
+				try {
+					uni.showLoading({ title: '加载中' })
+					const res = await api.listShiftConfig({
+						shift_name: this.filter.shift_name,
+						is_holiday: this.filter.only_holiday ? 1 : -1
+					})
+					uni.hideLoading()
+					ensureOk(res)
+					this.shifts = (res.shifts || []).map(item => {
+						if (item.start_time && item.start_time.length > 5) {
+							item.start_time = item.start_time.substring(0, 5)
+						}
+						if (item.end_time && item.end_time.length > 5) {
+							item.end_time = item.end_time.substring(0, 5)
+						}
+						return item
+					})
+				} catch (e) {
+					uni.hideLoading()
+					console.error(e)
+				}
+			}
+		}
+	}
+</script>
+
+<style>
+	.field {
+		margin-bottom: 20px;
+	}
+
+	.row-group {
+		flex-direction: row;
+		justify-content: space-between;
+	}
+
+	.half {
+		width: 48%;
+	}
+
+	.picker-text {
+		height: 50px;
+		line-height: 22px;
+		color: #1d1d1f;
+	}
+
+	.switch-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 4px 0;
+	}
+
+	.switch-label {
+		margin-bottom: 0;
+		font-size: 17px;
+		color: #1d1d1f;
+	}
+
+	.filter-bar {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 16px;
+	}
+
+	.search-input {
+		flex: 1;
+		margin-right: 12px;
+	}
+
+	.filter-btn {
+		background-color: #f5f5f7;
+		color: #0071e3;
+		border-radius: 980px;
+		padding: 0 20px;
+		height: 48px;
+		line-height: 48px;
+		font-size: 15px;
+		font-weight: 600;
+		border: none;
+	}
+
+	.filter-options {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 24px;
+		padding: 0 4px;
+	}
+
+	.compact {
+		margin-bottom: 0;
+	}
+
+	.filter-label {
+		font-size: 14px;
+		color: #86868b;
+		margin-right: 8px;
+	}
+
+	.reset-link {
+		font-size: 14px;
+		color: #0071e3;
+	}
+
+	.empty-state {
+		padding: 40px 0;
+		align-items: center;
+	}
+
+	.empty-text {
+		color: #86868b;
+		font-size: 15px;
+	}
+
+	.list-container {
+		border-top: 1px solid #f5f5f7;
+	}
+
+	.list-item {
+		padding: 16px 0;
+		border-bottom: 1px solid #f5f5f7;
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+	}
+	
+	.list-item:last-child {
+		border-bottom: none;
+	}
+
+	.item-main {
+		flex: 1;
+	}
+
+	.item-header {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 4px;
+	}
+
+	.item-title {
+		font-size: 17px;
+		font-weight: 600;
+		color: #1d1d1f;
+		margin-right: 8px;
+	}
+
+	.holiday-badge {
+		background-color: #ff3b30;
+		color: #ffffff;
+		font-size: 10px;
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-weight: 600;
+	}
+
+	.item-subtitle {
+		font-size: 14px;
+		color: #86868b;
+	}
+
+	.item-meta {
+		align-items: flex-end;
+	}
+
+	.meta-label {
+		font-size: 11px;
+		color: #86868b;
+		margin-bottom: 2px;
+	}
+
+	.meta-value {
+		font-size: 17px;
+		font-weight: 600;
+		color: #1d1d1f;
+	}
+
+	.btn-row {
+		flex-direction: row;
+		gap: 12px;
+	}
+
+	.cancel-btn {
+		background-color: #f5f5f7;
+		color: #86868b;
+		border-radius: 980px;
+		height: 50px;
+		line-height: 50px;
+		font-size: 17px;
+		font-weight: 600;
+		border: none;
+		flex: 1;
+	}
+
+	.item-actions {
+		flex-direction: row;
+		gap: 12px;
+		margin-left: 12px;
+	}
+
+	.action-btn {
+		font-size: 14px;
+		font-weight: 500;
+		padding: 6px 12px;
+		border-radius: 6px;
+	}
+
+	.edit-btn {
+		color: #0071e3;
+		background-color: rgba(0, 113, 227, 0.1);
+	}
+
+	.delete-btn {
+		color: #ff3b30;
+		background-color: rgba(255, 59, 48, 0.1);
+	}
+</style>

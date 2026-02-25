@@ -1,0 +1,5 @@
+*.md
+*.sh
+go.mod
+go.sum
+*.log

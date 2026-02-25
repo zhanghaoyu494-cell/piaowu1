@@ -1,0 +1,13 @@
+<template>
+	<view class="page-container">
+		<LeaveApproveView />
+	</view>
+</template>
+
+<script>
+	import LeaveApproveView from '../../components/views/LeaveApproveView.uvue'
+
+	export default {
+		components: { LeaveApproveView }
+	}
+</script>

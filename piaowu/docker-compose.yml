@@ -1,0 +1,141 @@
+services:
+  # 1. 数据库支持
+  mysql:
+    image: mysql:8.0
+    container_name: piaowu-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=Zhyzhy666888
+      - MYSQL_DATABASE=ccc
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - piaowu-net
+
+  redis:
+    image: redis:alpine
+    container_name: piaowu-redis
+    restart: unless-stopped
+    # 内部网络通信，不需要对外暴露端口
+    networks:
+      - piaowu-net
+
+  # 2. 向量数据库 (Milvus + Attu)
+  milvus:
+    image: milvusdb/milvus:v2.3.3
+    container_name: piaowu-milvus
+    restart: unless-stopped
+    command: [ "milvus", "run", "standalone" ]
+    environment:
+      # 使用内嵌 etcd 模式（Windows Docker 兼容）
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+    ports:
+      - "19530:19530" # Milvus gRPC
+      - "9091:9091" # Milvus metrics / health
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9091/healthz" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - piaowu-net
+
+  attu:
+    image: zilliz/attu:latest
+    container_name: piaowu-attu
+    restart: unless-stopped
+    ports:
+      - "8000:3000" # 浏览器访问 http://localhost:8000
+    environment:
+      MILVUS_URL: "milvus:19530"
+    depends_on:
+      - milvus
+    networks:
+      - piaowu-net
+
+  # 3. 链路追踪
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: piaowu-jaeger
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318" # OTLP HTTP
+    networks:
+      - piaowu-net
+
+  # 4. 业务服务层
+  customer-service:
+    build:
+      context: .
+      dockerfile: service/customer/Dockerfile
+    container_name: piaowu-customer-service
+    restart: always
+    environment:
+      - SERVER_ADDRESS=:8888
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=Zhyzhy666888
+      - MYSQL_DATABASE=ccc
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TRACE_ENABLED=true
+      - TRACE_ENDPOINT=http://jaeger:4318/v1/traces
+    depends_on:
+      - mysql
+      - redis
+      - jaeger
+    networks:
+      - piaowu-net
+
+  chat-model:
+    build:
+      context: .
+      dockerfile: chatModel/deployments/Dockerfile
+    container_name: piaowu-chat-model
+    image: piaowu/chat-model:latest
+    restart: always
+    environment:
+      - APP_PORT=8082
+      - DATABASE_DSN=root:Zhyzhy666888@tcp(mysql:3306)/ccc?charset=utf8mb4&parseTime=True&loc=Local
+    depends_on:
+      - mysql
+    networks:
+      - piaowu-net
+
+  # 5. 网关层
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: piaowu-gateway
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      - SERVER_ADDRESS=:8081
+      - SERVICES_CUSTOMER_ADDRESS=customer-service:8888
+      - SERVICES_CHATMODEL_ADDRESS=http://chat-model:8082
+      - JWT_SECRET=piaowu-secret-key-2026
+      - TRACE_ENABLED=true
+      - TRACE_ENDPOINT=http://jaeger:4318/v1/traces
+    depends_on:
+      - customer-service
+      - chat-model
+    networks:
+      - piaowu-net
+
+networks:
+  piaowu-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  milvus_data:

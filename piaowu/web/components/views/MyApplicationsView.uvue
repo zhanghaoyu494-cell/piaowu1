@@ -1,0 +1,312 @@
+<template>
+	<view class="my-applications-view">
+		<text class="section-title">我的申请记录</text>
+		
+		<view class="card">
+			<view class="filter-bar">
+				<input class="apple-input search-input" v-model="filter.keyword" placeholder="搜索原因或备注" />
+				<button class="filter-btn" @click="loadList">搜索</button>
+			</view>
+
+			<view class="filter-options">
+				<view class="status-tabs">
+					<view class="status-tab" :class="{ active: filter.status === -1 }" @click="setStatus(-1)">
+						<text class="status-tab-text">全部</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.status === 0 }" @click="setStatus(0)">
+						<text class="status-tab-text">待审批</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.status === 1 }" @click="setStatus(1)">
+						<text class="status-tab-text">已通过</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.status === 2 }" @click="setStatus(2)">
+						<text class="status-tab-text">已拒绝</text>
+					</view>
+				</view>
+				<button class="apple-btn apple-btn-small" hover-class="apple-btn-hover" @click="loadList">刷新</button>
+			</view>
+
+			<view v-if="items.length === 0" class="empty-state">
+				<text class="empty-text">暂无申请记录</text>
+			</view>
+
+			<view v-else class="application-list">
+				<view v-for="item in items" :key="item.apply_id" class="app-item">
+					<view class="app-header">
+						<view class="app-info">
+							<text class="app-id">#{{ item.apply_id }}</text>
+							<text class="app-type">{{ applyTypeText(item.apply_type) }}</text>
+						</view>
+						<text class="badge" :class="badgeClass(item.approval_status)">{{ statusText(item.approval_status) }}</text>
+					</view>
+					<text class="app-date">{{ formatDateRange(item) }}</text>
+					<text class="app-reason">{{ item.reason || '（无原因）' }}</text>
+					<view v-if="item.approval_status !== 0" class="app-result">
+						<text class="result-label">审批人：</text>
+						<text class="result-value">{{ item.approver_name || item.approver_id || '-' }}</text>
+					</view>
+					<view v-if="item.approval_status !== 0 && item.approval_remark" class="app-result">
+						<text class="result-label">审批意见：</text>
+						<text class="result-value">{{ item.approval_remark }}</text>
+					</view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script>
+	import { api } from '../../common/api.js'
+	import { ensureOk } from '../../common/request.js'
+
+	export default {
+		data() {
+			return {
+				filter: {
+					status: -1,
+					keyword: ''
+				},
+				items: []
+			}
+		},
+		mounted() {
+			this.loadList()
+		},
+		methods: {
+			statusText(s) {
+				if (s === 0) return '待审批'
+				if (s === 1) return '已通过'
+				if (s === 2) return '已拒绝'
+				return '未知'
+			},
+			badgeClass(s) {
+				if (s === 0) return 'badge-pending'
+				if (s === 1) return 'badge-pass'
+				if (s === 2) return 'badge-reject'
+				return 'badge-unknown'
+			},
+			applyTypeText(t) {
+				return t === 1 ? '调班' : '请假'
+			},
+			setStatus(s) {
+				this.filter.status = s
+				this.loadList()
+			},
+			// 格式化日期范围显示
+			formatDateRange(item) {
+				if (!item) return '-'
+				// 如果有start_date和end_date，显示范围
+				if (item.start_date && item.end_date) {
+					const periodText = (p) => {
+						if (p === 0) return '全天'
+						if (p === 1) return '上午'
+						if (p === 2) return '下午'
+						return ''
+					}
+					if (item.start_date === item.end_date) {
+						// 同一天
+						if (item.start_period === 0) {
+							return item.start_date + ' 全天'
+						}
+						return item.start_date + ' ' + periodText(item.start_period)
+					}
+					// 不同天
+					return item.start_date + periodText(item.start_period) + ' ~ ' + item.end_date + periodText(item.end_period)
+				}
+				// 兼容旧数据：只有target_date
+				return item.target_date || '-'
+			},
+			async loadList() {
+				try {
+					uni.showLoading({ title: '加载中' })
+					// 获取当前用户ID（从本地存储）
+					const userInfoStr = uni.getStorageSync('userInfo')
+					let userId = ''
+					if (userInfoStr) {
+						try {
+							const userInfo = JSON.parse(userInfoStr)
+							userId = userInfo.user_name || userInfo.cs_id || ''
+						} catch (e) {
+							console.error('解析用户信息失败:', e)
+						}
+					}
+
+					const res = await api.listLeaveTransfer({
+						cs_id: userId,
+						approval_status: this.filter.status,
+						keyword: (this.filter.keyword || '').trim(),
+						page: 1,
+						page_size: 50
+					})
+					uni.hideLoading()
+					ensureOk(res)
+					this.items = res.items || []
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '加载失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			}
+		}
+	}
+</script>
+
+<style>
+	.filter-bar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.search-input {
+		flex: 1;
+		margin-right: 10px;
+	}
+
+	.filter-btn {
+		height: 44px;
+		line-height: 44px;
+		padding: 0 16px;
+		background-color: #0071e3;
+		color: #ffffff;
+		border-radius: 12px;
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	.filter-options {
+		margin-top: 12px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.status-tabs {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.status-tab {
+		height: 32px;
+		padding: 0 12px;
+		border-radius: 10px;
+		background-color: #f5f5f7;
+		justify-content: center;
+		margin-right: 8px;
+	}
+
+	.status-tab.active {
+		background-color: #e8f3ff;
+	}
+
+	.status-tab-text {
+		font-size: 13px;
+		color: #1d1d1f;
+	}
+
+	.empty-state {
+		margin-top: 40px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.empty-text {
+		color: #86868b;
+		font-size: 15px;
+	}
+
+	.application-list {
+		margin-top: 16px;
+	}
+
+	.app-item {
+		background-color: #ffffff;
+		border: 1px solid #f0f0f0;
+		border-radius: 12px;
+		padding: 16px;
+		margin-bottom: 12px;
+	}
+
+	.app-header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8px;
+	}
+
+	.app-info {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.app-id {
+		font-size: 15px;
+		font-weight: 600;
+		color: #1d1d1f;
+		margin-right: 8px;
+	}
+
+	.app-type {
+		font-size: 13px;
+		color: #6b7280;
+		background-color: #f5f5f7;
+		padding: 2px 8px;
+		border-radius: 6px;
+	}
+
+	.badge {
+		height: 22px;
+		line-height: 22px;
+		padding: 0 10px;
+		border-radius: 11px;
+		font-size: 12px;
+		color: #ffffff;
+	}
+
+	.badge-pending {
+		background-color: #86909c;
+	}
+
+	.badge-pass {
+		background-color: #34c759;
+	}
+
+	.badge-reject {
+		background-color: #ff3b30;
+	}
+
+	.badge-unknown {
+		background-color: #111827;
+	}
+
+	.app-date {
+		font-size: 14px;
+		color: #1d1d1f;
+		margin-bottom: 6px;
+	}
+
+	.app-reason {
+		font-size: 13px;
+		color: #6b7280;
+		margin-bottom: 8px;
+	}
+
+	.app-result {
+		flex-direction: row;
+		margin-top: 4px;
+	}
+
+	.result-label {
+		font-size: 13px;
+		color: #6b7280;
+	}
+
+	.result-value {
+		font-size: 13px;
+		color: #1d1d1f;
+		flex: 1;
+	}
+</style>

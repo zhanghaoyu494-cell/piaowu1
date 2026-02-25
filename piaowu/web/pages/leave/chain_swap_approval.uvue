@@ -1,0 +1,622 @@
+<template>
+	<view class="page-container">
+		<text class="section-title">链式调班审批</text>
+		
+		<view class="card">
+			<view class="filter-bar">
+				<input class="apple-input search-input" v-model="filter.keyword" placeholder="搜索申请人/部门" />
+				<button class="filter-btn" @click="loadList">搜索</button>
+			</view>
+
+			<view class="filter-options">
+				<view class="status-tabs">
+					<view class="status-tab" :class="{ active: filter.status === -1 }" @click="setStatus(-1)">
+						<text class="status-tab-text">全部</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.status === 0 }" @click="setStatus(0)">
+						<text class="status-tab-text">待审批</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.status === 1 }" @click="setStatus(1)">
+						<text class="status-tab-text">已通过</text>
+					</view>
+					<view class="status-tab" :class="{ active: filter.status === 2 }" @click="setStatus(2)">
+						<text class="status-tab-text">已拒绝</text>
+					</view>
+				</view>
+				<button class="apple-btn apple-btn-small" hover-class="apple-btn-hover" @click="loadList">刷新</button>
+			</view>
+
+			<view v-if="items.length === 0" class="empty-state">
+				<text class="empty-text">暂无链式调班申请</text>
+			</view>
+
+			<view class="split">
+				<view class="left">
+					<scroll-view scroll-y="true" class="list-scroll">
+						<view v-for="it in items" :key="it.swap_id" class="list-item" :class="{ selected: selectedSwapId === it.swap_id }" @click="selectItem(it)">
+							<view class="item-header">
+								<text class="item-title">#{{ it.swap_id }} {{ it.applicant_name || it.applicant_id }}</text>
+								<text class="badge" :class="badgeClass(it.status)">{{ statusText(it.status) }}</text>
+							</view>
+							<text class="item-sub">{{ it.dept_id }} · {{ it.items_count || 0 }} 步调班</text>
+							<text class="item-reason">{{ it.reason || '（无原因）' }}</text>
+						</view>
+					</scroll-view>
+				</view>
+
+				<view class="right">
+					<view v-if="!detail" class="empty-detail">
+						<text class="empty-text">请选择左侧申请查看详情</text>
+					</view>
+
+					<scroll-view v-else scroll-y="true" class="detail-scroll">
+						<view class="detail-card">
+							<text class="detail-title">申请详情</text>
+
+							<view class="kv">
+								<text class="k">申请ID</text>
+								<text class="v">#{{ detail.swap_id }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">申请人</text>
+								<text class="v">{{ detail.applicant_name || '-' }}（{{ detail.applicant_id }}）</text>
+							</view>
+							<view class="kv">
+								<text class="k">部门</text>
+								<text class="v">{{ detail.dept_id || '-' }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">申请原因</text>
+								<text class="v">{{ detail.reason || '（无）' }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">提交时间</text>
+								<text class="v">{{ detail.create_time || '-' }}</text>
+							</view>
+							<view class="kv">
+								<text class="k">审批状态</text>
+								<text class="v">{{ statusText(detail.status) }}</text>
+							</view>
+							<view class="kv" v-if="detail.status !== 0">
+								<text class="k">审批人</text>
+								<text class="v">{{ detail.approver_name || detail.approver_id || '-' }}</text>
+							</view>
+							<view class="kv" v-if="detail.status !== 0">
+								<text class="k">审批时间</text>
+								<text class="v">{{ detail.approved_at || '-' }}</text>
+							</view>
+							<view class="kv" v-if="detail.status !== 0 && detail.approve_comment">
+								<text class="k">审批备注</text>
+								<text class="v">{{ detail.approve_comment }}</text>
+							</view>
+
+							<view class="divider"></view>
+
+							<text class="detail-title">调班链路</text>
+							<view class="chain-visualization">
+								<view v-for="(item, idx) in detail.items" :key="idx" class="chain-step">
+									<view class="step-card">
+										<view class="step-header">
+											<text class="step-number">步骤 {{ item.step }}</text>
+											<text v-if="item.conflict_flag === 1" class="conflict-tag">⚠️ 冲突</text>
+										</view>
+										<view class="step-info">
+											<text class="step-label">客服:</text>
+											<text class="step-value">{{ item.cs_name || item.cs_id }}</text>
+										</view>
+										<view class="step-info">
+											<text class="step-label">原班次:</text>
+											<text class="step-value">{{ item.from_shift_name || item.from_schedule_id }}</text>
+										</view>
+										<view class="step-info">
+											<text class="step-label">换到:</text>
+											<text class="step-value">{{ item.to_shift_name || item.to_schedule_id }}</text>
+										</view>
+										<text v-if="item.conflict_reason" class="conflict-reason">冲突原因: {{ item.conflict_reason }}</text>
+									</view>
+									<view v-if="idx < detail.items.length - 1" class="chain-arrow">
+										<text class="arrow-icon">↓</text>
+									</view>
+								</view>
+							</view>
+
+							<view class="divider"></view>
+
+							<text class="detail-title">执行审批</text>
+							<view class="field">
+								<text class="form-label">审批人姓名</text>
+								<input class="apple-input" v-model="approve.approver_name" placeholder="请输入您的姓名" />
+							</view>
+							<view class="field">
+								<text class="form-label">审批备注（可选）</text>
+								<input class="apple-input" v-model="approve.approve_comment" placeholder="填写审批意见或备注" />
+							</view>
+							<view class="field">
+								<text class="form-label">审批结果</text>
+								<view class="approve-actions">
+									<button class="approve-btn pass" :class="{ selected: approveStatusIndex === 0 }" @click="setApproveStatus(0)">通过</button>
+									<button class="approve-btn reject" :class="{ selected: approveStatusIndex === 1 }" @click="setApproveStatus(1)">拒绝</button>
+								</view>
+							</view>
+							<button class="apple-btn" style="background-color: #34c759;" :disabled="detail.status !== 0" @click="submitApprove">
+								{{ detail.status === 0 ? '提交审批' : '已审批' }}
+							</button>
+						</view>
+					</scroll-view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script>
+	import { api } from '../../common/api.js'
+	import { ensureOk } from '../../common/request.js'
+
+	export default {
+		data() {
+			return {
+				filter: {
+					status: 0,
+					keyword: ''
+				},
+				items: [],
+				selectedSwapId: 0,
+				detail: null,
+				approveStatusIndex: 0,
+				approve: {
+					approver_id: '',
+					approver_name: '',
+					approve_comment: ''
+				}
+			}
+		},
+		mounted() {
+			this.loadList()
+		},
+		methods: {
+			statusText(s) {
+				if (s === 0) return '待审批'
+				if (s === 1) return '已通过'
+				if (s === 2) return '已拒绝'
+				if (s === 3) return '已取消'
+				return '未知'
+			},
+			badgeClass(s) {
+				if (s === 0) return 'badge-pending'
+				if (s === 1) return 'badge-pass'
+				if (s === 2) return 'badge-reject'
+				if (s === 3) return 'badge-cancel'
+				return 'badge-unknown'
+			},
+			setStatus(s) {
+				this.filter.status = s
+				this.selectedSwapId = 0
+				this.detail = null
+				this.loadList()
+			},
+			setApproveStatus(index) {
+				this.approveStatusIndex = index
+			},
+			async loadList() {
+				try {
+					uni.showLoading({ title: '加载中' })
+					const res = await api.listChainSwap({
+						status: this.filter.status,
+						keyword: (this.filter.keyword || '').trim(),
+						page: 1,
+						page_size: 50
+					})
+					uni.hideLoading()
+					ensureOk(res)
+					this.items = res.items || []
+					if (this.selectedSwapId > 0) {
+						const hit = this.items.find(x => x.swap_id === this.selectedSwapId)
+						if (!hit) {
+							this.selectedSwapId = 0
+							this.detail = null
+						}
+					}
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '加载失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			},
+			async selectItem(it) {
+				if (!it || !it.swap_id) return
+				this.selectedSwapId = it.swap_id
+				this.detail = null
+
+				try {
+					uni.showLoading({ title: '加载详情' })
+					const res = await api.getChainSwap(it.swap_id)
+					uni.hideLoading()
+					ensureOk(res)
+					this.detail = res.item || null
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '获取详情失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			},
+			async submitApprove() {
+				if (!this.detail || !this.detail.swap_id) {
+					uni.showToast({ title: '请先选择申请', icon: 'none' })
+					return
+				}
+				if (this.detail.status !== 0) {
+					uni.showToast({ title: '该申请已审批', icon: 'none' })
+					return
+				}
+
+				const approverName = (this.approve.approver_name || '').trim()
+				const approveComment = (this.approve.approve_comment || '').trim()
+				const status = this.approveStatusIndex + 1
+				if (!approverName) {
+					uni.showToast({ title: '请输入审批人姓名', icon: 'none' })
+					return
+				}
+
+				try {
+					uni.showLoading({ title: '处理中' })
+					const res = await api.approveChainSwap({
+						swap_id: this.detail.swap_id,
+						status: status,
+						approver_id: approverName,
+						approver_name: approverName,
+						approve_comment: approveComment
+					})
+					uni.hideLoading()
+
+					if (res.base_resp && res.base_resp.code === 409) {
+						uni.showModal({
+							title: '审批失败',
+							content: '调班冲突：' + res.base_resp.msg,
+							showCancel: false
+						})
+						return
+					}
+
+					ensureOk(res)
+					uni.showToast({ title: '审批成功' })
+
+					await this.selectItem({ swap_id: this.detail.swap_id })
+					await this.loadList()
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '审批失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			}
+		}
+	}
+</script>
+
+<style>
+	.filter-bar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.search-input {
+		flex: 1;
+		margin-right: 10px;
+	}
+
+	.filter-btn {
+		height: 44px;
+		line-height: 44px;
+		padding: 0 16px;
+		background-color: #0071e3;
+		color: #ffffff;
+		border-radius: 12px;
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	.filter-options {
+		margin-top: 12px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.status-tabs {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.status-tab {
+		height: 32px;
+		padding: 0 12px;
+		border-radius: 10px;
+		background-color: #f5f5f7;
+		justify-content: center;
+		margin-right: 8px;
+	}
+
+	.status-tab.active {
+		background-color: #e8f3ff;
+	}
+
+	.status-tab-text {
+		font-size: 13px;
+		color: #1d1d1f;
+	}
+
+	.split {
+		margin-top: 16px;
+		flex-direction: row;
+		height: 600px;
+	}
+
+	.left {
+		width: 35%;
+		border-right: 1px solid #ebedf0;
+		padding-right: 12px;
+	}
+
+	.right {
+		width: 65%;
+		padding-left: 12px;
+	}
+
+	.list-scroll {
+		height: 600px;
+	}
+
+	.detail-scroll {
+		height: 600px;
+	}
+
+	.list-item {
+		padding: 12px;
+		border-radius: 12px;
+		background-color: #ffffff;
+		border: 1px solid #f0f0f0;
+		margin-bottom: 10px;
+		cursor: pointer;
+	}
+
+	.list-item.selected {
+		border-color: #0071e3;
+		background-color: #f5faff;
+	}
+
+	.item-header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.item-title {
+		font-size: 15px;
+		font-weight: 600;
+		color: #1d1d1f;
+	}
+
+	.item-sub {
+		margin-top: 6px;
+		font-size: 13px;
+		color: #6b7280;
+	}
+
+	.item-reason {
+		margin-top: 8px;
+		font-size: 13px;
+		color: #1d1d1f;
+	}
+
+	.badge {
+		height: 22px;
+		line-height: 22px;
+		padding: 0 10px;
+		border-radius: 11px;
+		font-size: 12px;
+		color: #ffffff;
+	}
+
+	.badge-pending {
+		background-color: #86909c;
+	}
+
+	.badge-pass {
+		background-color: #34c759;
+	}
+
+	.badge-reject {
+		background-color: #ff3b30;
+	}
+
+	.badge-cancel {
+		background-color: #ffcc00;
+	}
+
+	.badge-unknown {
+		background-color: #111827;
+	}
+
+	.detail-card {
+		background-color: #ffffff;
+		border: 1px solid #f0f0f0;
+		border-radius: 12px;
+		padding: 14px;
+		margin-bottom: 16px;
+	}
+
+	.detail-title {
+		font-size: 15px;
+		font-weight: 600;
+		color: #1d1d1f;
+		margin-bottom: 10px;
+	}
+
+	.kv {
+		flex-direction: row;
+		justify-content: space-between;
+		margin-bottom: 8px;
+	}
+
+	.k {
+		font-size: 13px;
+		color: #6b7280;
+	}
+
+	.v {
+		font-size: 13px;
+		color: #1d1d1f;
+		max-width: 65%;
+		text-align: right;
+	}
+
+	.divider {
+		height: 1px;
+		background-color: #ebedf0;
+		margin: 12px 0;
+	}
+
+	/* 链路可视化 */
+	.chain-visualization {
+		margin-top: 12px;
+	}
+
+	.chain-step {
+		margin-bottom: 8px;
+	}
+
+	.step-card {
+		background-color: #f8f9fa;
+		border-radius: 10px;
+		padding: 12px;
+		border: 1px solid #e5e5e7;
+	}
+
+	.step-header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8px;
+	}
+
+	.step-number {
+		font-size: 14px;
+		font-weight: 600;
+		color: #0071e3;
+	}
+
+	.conflict-tag {
+		font-size: 12px;
+		color: #ff3b30;
+		background-color: #ffebe9;
+		padding: 2px 8px;
+		border-radius: 6px;
+	}
+
+	.step-info {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 4px;
+	}
+
+	.step-label {
+		font-size: 13px;
+		color: #6b7280;
+		width: 70px;
+	}
+
+	.step-value {
+		font-size: 13px;
+		color: #1d1d1f;
+		flex: 1;
+	}
+
+	.conflict-reason {
+		font-size: 12px;
+		color: #ff3b30;
+		margin-top: 6px;
+		line-height: 16px;
+	}
+
+	.chain-arrow {
+		align-items: center;
+		justify-content: center;
+		height: 30px;
+	}
+
+	.arrow-icon {
+		font-size: 24px;
+		color: #0071e3;
+		font-weight: bold;
+	}
+
+	.empty-detail {
+		height: 600px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.empty-state {
+		margin-top: 20px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.empty-text {
+		color: #86868b;
+		font-size: 13px;
+	}
+
+	.field {
+		margin-bottom: 14px;
+	}
+
+	.approve-actions {
+		flex-direction: row;
+		justify-content: space-between;
+	}
+
+	.approve-btn {
+		flex: 1;
+		height: 44px;
+		line-height: 44px;
+		text-align: center;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 500;
+		border: 1px solid transparent;
+		margin: 0 4px;
+	}
+
+	.approve-btn.pass {
+		background-color: #f5f5f7;
+		color: #34c759;
+	}
+
+	.approve-btn.pass.selected {
+		background-color: #e8f9ec;
+		border-color: #34c759;
+		font-weight: 600;
+	}
+
+	.approve-btn.reject {
+		background-color: #f5f5f7;
+		color: #ff3b30;
+	}
+
+	.approve-btn.reject.selected {
+		background-color: #ffebe9;
+		border-color: #ff3b30;
+		font-weight: 600;
+	}
+</style>

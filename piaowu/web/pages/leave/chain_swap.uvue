@@ -1,0 +1,300 @@
+<template>
+	<view class="page-container">
+		<text class="section-title">链式调班申请</text>
+		<view class="card">
+			<view class="info-tip">
+				<text class="tip-text">💡 链式调班支持多人互换班次，例如：A→B→C 或 A→B→C→A</text>
+			</view>
+
+			<view class="form-group">
+				<view class="field">
+					<text class="form-label">申请人ID</text>
+					<input class="apple-input" v-model="form.applicant_id" placeholder="例如：KF001" />
+				</view>
+
+				<view class="field">
+					<text class="form-label">所属部门</text>
+					<input class="apple-input" v-model="form.dept_id" placeholder="例如：DEPT01" />
+				</view>
+
+				<view class="field">
+					<text class="form-label">申请原因</text>
+					<input class="apple-input" v-model="form.reason" placeholder="请输入调班原因" />
+				</view>
+			</view>
+
+			<!-- 调班链路 -->
+			<view class="chain-section">
+				<view class="section-header">
+					<text class="section-subtitle">调班链路</text>
+					<button class="small-btn" @click="addChainItem">+ 添加步骤</button>
+				</view>
+
+				<view class="chain-list">
+					<view class="chain-item" v-for="(item, index) in form.items" :key="index">
+						<view class="chain-header">
+							<text class="chain-step">步骤 {{ index + 1 }}</text>
+							<text class="chain-remove" @click="removeChainItem(index)" v-if="form.items.length > 2">删除</text>
+						</view>
+						
+						<view class="field">
+							<text class="form-label-small">客服ID</text>
+							<input class="apple-input-small" v-model="item.cs_id" placeholder="KF001" />
+						</view>
+
+						<view class="row-group">
+							<view class="field half">
+								<text class="form-label-small">从排班ID</text>
+								<input class="apple-input-small" type="number" v-model="item.from_schedule_id_str" placeholder="原排班" />
+							</view>
+							<view class="field half">
+								<text class="form-label-small">到排班ID</text>
+								<input class="apple-input-small" type="number" v-model="item.to_schedule_id_str" placeholder="目标排班" />
+							</view>
+						</view>
+
+						<view class="chain-arrow" v-if="index < form.items.length - 1">
+							<text class="arrow-icon">↓</text>
+						</view>
+					</view>
+				</view>
+			</view>
+
+			<button class="apple-btn" @click="submitChainSwap">提交链式调班申请</button>
+			<text v-if="lastRequestId > 0" class="hint-text text-center">申请ID：{{ lastRequestId }}</text>
+		</view>
+	</view>
+</template>
+
+<script>
+	import { api } from '../../common/api.js'
+	import { ensureOk } from '../../common/request.js'
+
+	export default {
+		data() {
+			return {
+				lastRequestId: 0,
+				form: {
+					applicant_id: '',
+					dept_id: '',
+					reason: '',
+					items: [
+						{ cs_id: '', from_schedule_id_str: '', to_schedule_id_str: '', step: 1 },
+						{ cs_id: '', from_schedule_id_str: '', to_schedule_id_str: '', step: 2 }
+					]
+				}
+			}
+		},
+		methods: {
+			addChainItem() {
+				this.form.items.push({
+					cs_id: '',
+					from_schedule_id_str: '',
+					to_schedule_id_str: '',
+					step: this.form.items.length + 1
+				})
+			},
+			removeChainItem(index) {
+				this.form.items.splice(index, 1)
+				// 重新调整step编号
+				this.form.items.forEach((item, idx) => {
+					item.step = idx + 1
+				})
+			},
+			async submitChainSwap() {
+				const applicantId = (this.form.applicant_id || '').trim()
+				const deptId = (this.form.dept_id || '').trim()
+				const reason = (this.form.reason || '').trim()
+
+				if (!applicantId) {
+					uni.showToast({ title: '请输入申请人ID', icon: 'none' })
+					return
+				}
+
+				if (!deptId) {
+					uni.showToast({ title: '请输入所属部门', icon: 'none' })
+					return
+				}
+
+				if (this.form.items.length < 2) {
+					uni.showToast({ title: '至少需要2个调班步骤', icon: 'none' })
+					return
+				}
+
+				// 验证每个步骤的数据
+				for (let i = 0; i < this.form.items.length; i++) {
+					const item = this.form.items[i]
+					if (!item.cs_id || !item.cs_id.trim()) {
+						uni.showToast({ title: `步骤${i + 1}：请输入客服ID`, icon: 'none' })
+						return
+					}
+					const fromId = parseInt(item.from_schedule_id_str, 10)
+					const toId = parseInt(item.to_schedule_id_str, 10)
+					if (Number.isNaN(fromId) || fromId <= 0) {
+						uni.showToast({ title: `步骤${i + 1}：原排班ID无效`, icon: 'none' })
+						return
+					}
+					if (Number.isNaN(toId) || toId <= 0) {
+						uni.showToast({ title: `步骤${i + 1}：目标排班ID无效`, icon: 'none' })
+						return
+					}
+				}
+
+				try {
+					uni.showLoading({ title: '提交中' })
+					const payload = {
+						applicant_id: applicantId,
+						dept_id: deptId,
+						reason: reason,
+						items: this.form.items.map((item, index) => ({
+							cs_id: item.cs_id.trim(),
+							from_schedule_id: parseInt(item.from_schedule_id_str, 10),
+							to_schedule_id: parseInt(item.to_schedule_id_str, 10),
+							step: index + 1
+						}))
+					}
+
+					const res = await api.applyChainSwap(payload)
+					uni.hideLoading()
+					ensureOk(res)
+					this.lastRequestId = res.request_id || 0
+					uni.showToast({ title: '提交成功' })
+				} catch (e) {
+					uni.hideLoading()
+					uni.showModal({
+						title: '提交失败',
+						content: e.errMsg || '未知错误',
+						showCancel: false
+					})
+				}
+			}
+		}
+	}
+</script>
+
+<style>
+	.info-tip {
+		background-color: #f0f9ff;
+		border-left: 3px solid #0071e3;
+		padding: 12px;
+		margin-bottom: 20px;
+		border-radius: 6px;
+	}
+
+	.tip-text {
+		font-size: 13px;
+		color: #0071e3;
+		line-height: 1.6;
+	}
+
+	.chain-section {
+		margin-top: 24px;
+		margin-bottom: 24px;
+	}
+
+	.section-header {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 16px;
+	}
+
+	.section-subtitle {
+		font-size: 15px;
+		font-weight: 600;
+		color: #1d1d1f;
+	}
+
+	.small-btn {
+		padding: 6px 12px;
+		background-color: #f5f5f7;
+		border-radius: 6px;
+		border: none;
+		font-size: 13px;
+		color: #0071e3;
+		font-weight: 500;
+	}
+
+	.chain-list {
+		/* no style */
+	}
+
+	.chain-item {
+		background-color: #f9f9f9;
+		padding: 16px;
+		border-radius: 8px;
+		margin-bottom: 16px;
+	}
+
+	.chain-header {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 12px;
+	}
+
+	.chain-step {
+		font-size: 14px;
+		font-weight: 600;
+		color: #0071e3;
+	}
+
+	.chain-remove {
+		font-size: 13px;
+		color: #ff3b30;
+		text-decoration: underline;
+	}
+
+	.form-label-small {
+		font-size: 13px;
+		font-weight: 500;
+		color: #1d1d1f;
+		margin-bottom: 6px;
+	}
+
+	.apple-input-small {
+		height: 44px;
+		line-height: 44px;
+		padding: 0 12px;
+		background-color: #ffffff;
+		border: 1px solid #d2d2d7;
+		border-radius: 6px;
+		font-size: 14px;
+		color: #1d1d1f;
+	}
+
+	.chain-arrow {
+		align-items: center;
+		justify-content: center;
+		margin-top: 8px;
+		margin-bottom: 8px;
+	}
+
+	.arrow-icon {
+		font-size: 24px;
+		color: #86868b;
+	}
+
+	.row-group {
+		flex-direction: row;
+		justify-content: space-between;
+	}
+
+	.field {
+		margin-bottom: 16px;
+	}
+
+	.half {
+		width: 48%;
+	}
+
+	.hint-text {
+		font-size: 13px;
+		color: #86868b;
+		margin-top: 12px;
+	}
+
+	.text-center {
+		text-align: center;
+	}
+</style>

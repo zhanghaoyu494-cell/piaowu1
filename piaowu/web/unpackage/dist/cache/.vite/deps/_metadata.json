@@ -1,0 +1,25 @@
+{
+  "hash": "a9ea4c6c",
+  "configHash": "0afb0e35",
+  "lockfileHash": "874ef0de",
+  "browserHash": "8e7cf134",
+  "optimized": {
+    "tslib": {
+      "src": "../../../../../node_modules/tslib/tslib.es6.js",
+      "file": "tslib.js",
+      "fileHash": "0512d695",
+      "needsInterop": false
+    },
+    "echarts": {
+      "src": "../../../../../node_modules/echarts/index.js",
+      "file": "echarts.js",
+      "fileHash": "2173cf4d",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-53M32JTR": {
+      "file": "chunk-53M32JTR.js"
+    }
+  }
+}
