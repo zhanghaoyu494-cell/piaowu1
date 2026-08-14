@@ -1,3 +1,0 @@
-@echo off
-echo Running database migration...
-go run scripts/migrate_new.go

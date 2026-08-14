@@ -1,3 +1,0 @@
-@echo off
-echo Starting Gateway...
-go run gateway/main.go

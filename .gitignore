@@ -1,5 +1,8 @@
-*.md
-*.sh
-go.mod
-go.sum
 *.log
+.idea/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+local-ai-memory/.local-data*/
