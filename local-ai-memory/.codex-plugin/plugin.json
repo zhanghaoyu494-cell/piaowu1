@@ -1,0 +1,33 @@
+{
+  "name": "local-ai-memory",
+  "version": "0.2.0",
+  "description": "Synchronize and search prior Codex tasks with a local encrypted memory cache.",
+  "author": {
+    "name": "Local AI Memory contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "memory",
+    "history",
+    "local-first"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Local AI Memory",
+    "shortDescription": "Search prior Codex task history locally.",
+    "longDescription": "Synchronizes relevant Codex task conversations into an encrypted local cache, extracts reviewable knowledge, and retrieves confirmed context with source task IDs.",
+    "developerName": "Local AI Memory contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Find relevant decisions from my prior Codex tasks.",
+      "Synchronize my available Codex task history.",
+      "Review unconfirmed knowledge extracted from Codex."
+    ]
+  }
+}

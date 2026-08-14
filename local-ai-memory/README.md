@@ -6,6 +6,17 @@ Local AI Memory 是一个仅面向 Codex 的本地长期记忆插件。
 
 > 当前版本只处理 `kind=codex` 的 Codex 任务。它不会读取普通 ChatGPT Quick chat、Claude、Trae、CodeBuddy、浏览器历史或其他应用的数据。
 
+## 发布方式
+
+本仓库适合公开上传 GitHub，定位是“开源代码 + 本地 Codex 插件”：
+
+- 用户从 GitHub 克隆代码，在自己的电脑安装 Python 包并注册本地插件。
+- 原始消息、SQLite 数据库和主密钥始终留在用户电脑，不属于仓库内容。
+- 当前 MCP 使用本地 stdio，不是公网 HTTP 服务，因此不能直接作为 OpenAI 通用插件目录中的公开托管插件提交。
+- 若未来要提交到通用目录，需要另外部署稳定的公网 HTTPS MCP，并重新设计认证、隐私政策和数据边界。
+
+公开仓库中的 `.gitignore` 已排除本地数据库、主密钥、虚拟环境、缓存和构建产物。推送前仍应运行 `git status`，人工检查暂存文件。
+
 ## 主要能力
 
 - 自动调用 Codex 原生 `list_threads` 和 `read_thread` 工具发现历史任务。
@@ -49,7 +60,7 @@ Local AI Memory 把 Codex 任务视为原始来源，把本地数据库视为可
 
 ## 系统要求
 
-- Windows 10 或 Windows 11。
+- Windows 10 或 Windows 11（当前主要测试平台）。
 - Codex 桌面应用。
 - Python 3.11 或更高版本。
 - 安装插件后需要新建一个 Codex 任务，让新任务加载 Skill 和 MCP 工具。
@@ -57,46 +68,45 @@ Local AI Memory 把 Codex 任务视为原始来源，把本地数据库视为可
 
 ## 安装
 
-### 1. 安装本地 Python 服务
+### 1. 克隆并安装本地 Python 服务
 
 在 PowerShell 中运行：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\lam init
+git clone <你的 GitHub 仓库 URL>
+cd local-ai-memory
+python -m pip install --user .
+python -m local_ai_memory.cli init
 ```
 
-`lam init` 会创建本地数据目录、SQLite 数据库和加密主密钥，并显示当前存储位置和统计信息。
+初始化命令会创建本地数据目录、SQLite 数据库和加密主密钥，并显示当前存储位置和统计信息。
 
-### 2. 检查 MCP 路径
+### 2. 检查 MCP 启动配置
 
-插件配置文件位于：
+仓库根目录已经包含可发布的 `.mcp.json`：
 
-```text
-C:\Users\v_hyuazhang\plugins\local-ai-memory\.mcp.json
+```json
+{
+  "mcpServers": {
+    "local-ai-memory": {
+      "command": "python",
+      "args": ["-m", "local_ai_memory.mcp_server"]
+    }
+  }
+}
 ```
 
-当前 MCP 使用以下 Python：
-
-```text
-F:\piaowu\piaowu1\local-ai-memory\.venv\Scripts\python.exe
-```
-
-如果项目被移动、虚拟环境被删除或 Python 路径发生变化，需要同步更新 `.mcp.json`。
+运行 `python -m local_ai_memory.mcp_server` 应进入 stdio 等待状态。如果 Codex 使用的 `python` 与安装包时不是同一个解释器，请把 `.mcp.json` 的 `command` 改为对应 Python 可执行文件；不要把包含个人绝对路径的修改提交到公共仓库。
 
 ### 3. 在 Codex 中安装插件
 
-点击下面的链接，在 Codex 插件页面安装：
-
-[View local-ai-memory](codex://plugins/local-ai-memory?marketplacePath=C%3A%5CUsers%5Cv_hyuazhang%5C.agents%5Cplugins%5Cmarketplace.json)
-
-个人 Marketplace 文件位于：
+在以该仓库为项目的 Codex 任务中输入：
 
 ```text
-C:\Users\v_hyuazhang\.agents\plugins\marketplace.json
+使用 $plugin-creator 将当前 local-ai-memory 目录注册为个人插件，创建个人 Marketplace 条目并验证插件。不要修改插件功能代码。
 ```
+
+Codex 会把插件注册到当前用户的个人 Marketplace。仓库已经包含 `.codex-plugin/plugin.json`、`.mcp.json` 和 `skills/`，不需要手工复制个人路径配置。
 
 ### 4. 新建 Codex 任务
 
@@ -242,14 +252,13 @@ Skill 会通过 `memory_source` 解密并返回对应的原始消息，同时保
 
 ## 每天凌晨 03:00 自动同步
 
-当前电脑已经创建名为“Codex 本地记忆同步”的 Codex Scheduled task：
+安装插件后，可以创建名为“Codex 本地记忆同步”的 Codex Scheduled task：
 
 - 执行时间：每天凌晨 `03:00`。
-- 运行目录：`F:\piaowu`。
+- 运行目录：选择一个本机 Codex 项目目录。
 - 执行环境：本地项目。
 - 处理范围：仅 Codex 任务。
-- 通知策略：仅执行失败时通知。
-- 模型：`gpt-5.6-terra`，推理强度 `medium`。
+- 通知策略：建议仅执行失败时通知。
 
 可以在 Codex 侧边栏的 **Scheduled** 页面查看、暂停、恢复或编辑任务。
 
@@ -274,63 +283,63 @@ Skill 会通过 `memory_source` 解密并返回对应的原始消息，同时保
 进入项目目录后运行：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
+cd <克隆后的 local-ai-memory 目录>
 ```
 
 ### 初始化或查看存储位置
 
 ```powershell
-.\.venv\Scripts\lam init
+python -m local_ai_memory.cli init
 ```
 
 ### 查看统计信息
 
 ```powershell
-.\.venv\Scripts\lam stats
+python -m local_ai_memory.cli stats
 ```
 
 ### 搜索已确认记忆
 
 ```powershell
-.\.venv\Scripts\lam search "项目数据库约束"
+python -m local_ai_memory.cli search "项目数据库约束"
 ```
 
 限制项目范围：
 
 ```powershell
-.\.venv\Scripts\lam search "分页规则" --project "project-id-or-path" --limit 10
+python -m local_ai_memory.cli search "分页规则" --project "project-id-or-path" --limit 10
 ```
 
 包含未确认候选：
 
 ```powershell
-.\.venv\Scripts\lam search "供应商查询" --include-candidates
+python -m local_ai_memory.cli search "供应商查询" --include-candidates
 ```
 
 ### 手工保存一条已确认记忆
 
 ```powershell
-.\.venv\Scripts\lam remember "该项目统一使用 Python 3.12" --project "my-project" --kind constraint
+python -m local_ai_memory.cli remember "该项目统一使用 Python 3.12" --project "my-project" --kind constraint
 ```
 
 ### 查看候选知识
 
 ```powershell
-.\.venv\Scripts\lam candidates --project "my-project" --limit 50
+python -m local_ai_memory.cli candidates --project "my-project" --limit 50
 ```
 
 ### 确认、拒绝或删除记忆
 
 ```powershell
-.\.venv\Scripts\lam confirm <memory-id>
-.\.venv\Scripts\lam reject <memory-id>
-.\.venv\Scripts\lam delete <memory-id>
+python -m local_ai_memory.cli confirm <memory-id>
+python -m local_ai_memory.cli reject <memory-id>
+python -m local_ai_memory.cli delete <memory-id>
 ```
 
 ### 查看来源消息
 
 ```powershell
-.\.venv\Scripts\lam source <message-id>
+python -m local_ai_memory.cli source <message-id>
 ```
 
 该命令会解密并显示原始消息，执行前应确认当前终端输出不会被共享或记录到不安全的位置。
@@ -338,7 +347,7 @@ cd F:\piaowu\piaowu1\local-ai-memory
 ### 查看已同步任务
 
 ```powershell
-.\.venv\Scripts\lam conversations --source codex --limit 100
+python -m local_ai_memory.cli conversations --source codex --limit 100
 ```
 
 ### 删除完整的本地任务副本
@@ -346,7 +355,7 @@ cd F:\piaowu\piaowu1\local-ai-memory
 先用 `conversations` 获取本地 `conversation_id`，再运行：
 
 ```powershell
-.\.venv\Scripts\lam delete-conversation <conversation-id>
+python -m local_ai_memory.cli delete-conversation <conversation-id>
 ```
 
 删除完整任务会删除本地加密原始消息，并清理没有其他来源的派生记忆。它不会删除 Codex 应用中的原始任务。
@@ -354,13 +363,13 @@ cd F:\piaowu\piaowu1\local-ai-memory
 ### 整理本地索引
 
 ```powershell
-.\.venv\Scripts\lam consolidate
+python -m local_ai_memory.cli consolidate
 ```
 
 ### 手工启动 MCP 服务
 
 ```powershell
-.\.venv\Scripts\lam mcp
+python -m local_ai_memory.cli mcp
 ```
 
 MCP 使用 stdio 通信。手工启动后终端看起来没有普通交互提示是正常现象，按 `Ctrl+C` 可以停止。
@@ -393,13 +402,13 @@ LocalAIMemory\
 
 ```powershell
 $env:LOCAL_AI_MEMORY_HOME = "D:\LocalAIMemoryData"
-.\.venv\Scripts\lam init
+python -m local_ai_memory.cli init
 ```
 
 也可以对单次命令使用 `--home`：
 
 ```powershell
-.\.venv\Scripts\lam --home "D:\LocalAIMemoryData" stats
+python -m local_ai_memory.cli --home "D:\LocalAIMemoryData" stats
 ```
 
 Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录，否则它们可能访问不同的数据库。
@@ -429,6 +438,7 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 - 原始消息正文使用 AES-256-GCM 加密后写入 SQLite。
 - Windows 主密钥使用当前用户的 DPAPI 加密。
 - 换一个 Windows 用户通常无法直接解密主密钥。
+- 非 Windows 系统当前把主密钥保存在权限为 `0600` 的本地文件中，不提供操作系统密钥环保护；公开使用前应评估本机威胁模型。
 - 为支持 SQLite 全文检索，经过敏感信息清洗的派生知识会以本地明文索引保存。
 - 数据库、主密钥和 Scheduled task 都保存在本机；不要把整个数据目录上传到公共仓库或云盘。
 
@@ -508,7 +518,7 @@ skills\local-ai-memory\references\tool-contracts.md
 依次检查：
 
 1. 插件是否已经在 Codex 中安装并启用。
-2. Marketplace 是否仍指向 `C:\Users\v_hyuazhang\plugins\local-ai-memory`。
+2. 个人 Marketplace 是否仍指向当前插件目录。
 3. 安装后是否新建了 Codex 任务。
 4. Skill 文件是否存在于插件的 `skills\local-ai-memory\SKILL.md`。
 
@@ -522,9 +532,8 @@ skills\local-ai-memory\references\tool-contracts.md
 {
   "mcpServers": {
     "local-ai-memory": {
-      "command": "F:\\piaowu\\piaowu1\\local-ai-memory\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "local_ai_memory.mcp_server"],
-      "cwd": "F:\\piaowu\\piaowu1\\local-ai-memory"
+      "command": "python",
+      "args": ["-m", "local_ai_memory.mcp_server"]
     }
   }
 }
@@ -533,8 +542,7 @@ skills\local-ai-memory\references\tool-contracts.md
 然后确认虚拟环境可以启动服务：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
-.\.venv\Scripts\python -m local_ai_memory.mcp_server
+python -m local_ai_memory.mcp_server
 ```
 
 如果没有立即报错，说明服务已经通过 stdio 等待 MCP 请求；按 `Ctrl+C` 退出。
@@ -544,7 +552,7 @@ cd F:\piaowu\piaowu1\local-ai-memory
 重新创建并安装：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
+cd <克隆后的 local-ai-memory 目录>
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
 ```
@@ -562,8 +570,8 @@ python -m venv .venv
 可以先查看：
 
 ```powershell
-.\.venv\Scripts\lam stats
-.\.venv\Scripts\lam candidates --limit 100
+python -m local_ai_memory.cli stats
+python -m local_ai_memory.cli candidates --limit 100
 ```
 
 ### Scheduled task 没有运行
@@ -574,7 +582,7 @@ python -m venv .venv
 2. 电脑是否开机且没有进入无法唤醒的状态。
 3. Codex 的 **Scheduled** 页面中任务是否为 Active。
 4. 插件是否仍然安装。
-5. `F:\piaowu` 和 MCP Python 路径是否仍然存在。
+5. Scheduled task 的项目目录和 MCP Python 命令是否仍然有效。
 6. Scheduled run 是否显示插件或 MCP 错误。
 
 ### 数据库被占用
@@ -589,14 +597,14 @@ SQLite 已启用 WAL 和 30 秒忙等待。若仍出现锁错误：
 
 ### Windows Store 版 `codex.exe` 提示 Access is denied
 
-这不会影响已经运行的 Codex 桌面应用，但可能阻止通过 CLI 安装本地插件。此时使用本文中的 `codex://plugins/...` 链接在 Codex 应用内完成安装。
+这不会影响已经运行的 Codex 桌面应用，但可能阻止通过 CLI 安装本地插件。此时在 Codex 桌面应用中使用 `$plugin-creator` 注册当前仓库，并从插件页面安装。
 
 ## 开发与验证
 
 ### 运行单元测试
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
+cd <克隆后的 local-ai-memory 目录>
 .\.venv\Scripts\python -m unittest discover -s tests -v
 ```
 
@@ -609,13 +617,13 @@ cd F:\piaowu\piaowu1\local-ai-memory
 ### 验证 Skill
 
 ```powershell
-.\.venv\Scripts\python C:\Users\v_hyuazhang\.codex\skills\.system\skill-creator\scripts\quick_validate.py skills\local-ai-memory
+.\.venv\Scripts\python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" skills\local-ai-memory
 ```
 
 ### 验证插件
 
 ```powershell
-.\.venv\Scripts\python C:\Users\v_hyuazhang\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py C:\Users\v_hyuazhang\plugins\local-ai-memory
+.\.venv\Scripts\python "$env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py" .
 ```
 
 ### 构建 Wheel
@@ -636,7 +644,7 @@ dist\local_ai_memory-0.2.0-py3-none-any.whl
 修改插件后，使用官方辅助脚本更新 cachebuster：
 
 ```powershell
-.\.venv\Scripts\python C:\Users\v_hyuazhang\.codex\skills\.system\plugin-creator\scripts\update_plugin_cachebuster.py C:\Users\v_hyuazhang\plugins\local-ai-memory
+.\.venv\Scripts\python "$env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\update_plugin_cachebuster.py" .
 ```
 
 更新后重新安装插件，并新建 Codex 任务进行验证。

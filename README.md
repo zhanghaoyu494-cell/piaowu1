@@ -52,10 +52,9 @@ piaowu1\
 在 PowerShell 中运行：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\lam init
+cd local-ai-memory
+python -m pip install --user .
+python -m local_ai_memory.cli init
 ```
 
 默认数据目录：
@@ -66,21 +65,11 @@ python -m venv .venv
 
 ### 2. 安装 Codex 插件
 
-当前个人插件源码位于：
+仓库中的 `local-ai-memory` 目录已经包含插件 Manifest、MCP 配置和 Skill。在以该目录为项目的 Codex 任务中输入：
 
 ```text
-C:\Users\v_hyuazhang\plugins\local-ai-memory
+使用 $plugin-creator 将当前 local-ai-memory 目录注册为个人插件，创建个人 Marketplace 条目并验证插件。不要修改插件功能代码。
 ```
-
-个人 Marketplace 位于：
-
-```text
-C:\Users\v_hyuazhang\.agents\plugins\marketplace.json
-```
-
-点击下面的链接，在 Codex 中打开并安装插件：
-
-[View local-ai-memory](codex://plugins/local-ai-memory?marketplacePath=C%3A%5CUsers%5Cv_hyuazhang%5C.agents%5Cplugins%5Cmarketplace.json)
 
 安装后必须新建一个 Codex 任务，使新任务加载 `$local-ai-memory` Skill 和 MCP 工具。
 
@@ -173,12 +162,12 @@ C:\Users\v_hyuazhang\.agents\plugins\marketplace.json
 
 ## 凌晨自动同步
 
-当前电脑已经创建 Codex Scheduled task：
+安装插件后，可以创建 Codex Scheduled task：
 
 ```text
 名称：Codex 本地记忆同步
 时间：每天凌晨 03:00
-目录：F:\piaowu
+目录：选择一个本机 Codex 项目目录
 范围：仅 Codex 任务
 通知：仅失败时通知
 ```
@@ -197,23 +186,23 @@ C:\Users\v_hyuazhang\.agents\plugins\marketplace.json
 进入实际项目目录：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
+cd <克隆后的 local-ai-memory 目录>
 ```
 
 常用命令：
 
 ```powershell
-.\.venv\Scripts\lam init
-.\.venv\Scripts\lam stats
-.\.venv\Scripts\lam search "项目数据库约束"
-.\.venv\Scripts\lam candidates --limit 50
-.\.venv\Scripts\lam confirm <memory-id>
-.\.venv\Scripts\lam reject <memory-id>
-.\.venv\Scripts\lam delete <memory-id>
-.\.venv\Scripts\lam source <message-id>
-.\.venv\Scripts\lam conversations --source codex
-.\.venv\Scripts\lam delete-conversation <conversation-id>
-.\.venv\Scripts\lam consolidate
+python -m local_ai_memory.cli init
+python -m local_ai_memory.cli stats
+python -m local_ai_memory.cli search "项目数据库约束"
+python -m local_ai_memory.cli candidates --limit 50
+python -m local_ai_memory.cli confirm <memory-id>
+python -m local_ai_memory.cli reject <memory-id>
+python -m local_ai_memory.cli delete <memory-id>
+python -m local_ai_memory.cli source <message-id>
+python -m local_ai_memory.cli conversations --source codex
+python -m local_ai_memory.cli delete-conversation <conversation-id>
+python -m local_ai_memory.cli consolidate
 ```
 
 命令行只维护本地缓存，不负责发现 Codex 历史。历史任务发现必须通过 Codex 原生任务工具完成。
@@ -249,7 +238,7 @@ cd F:\piaowu\piaowu1\local-ai-memory
 运行单元测试：
 
 ```powershell
-cd F:\piaowu\piaowu1\local-ai-memory
+cd <克隆后的 local-ai-memory 目录>
 .\.venv\Scripts\python -m unittest discover -s tests -v
 ```
 

@@ -1,4 +1,4 @@
 interface:
   display_name: "Local AI Memory"
-  short_description: "自动同步、检索并核验 Codex 历史任务中的长期知识"
+  short_description: "Sync, search, and verify knowledge from prior Codex tasks"
   default_prompt: "Use $local-ai-memory to automatically sync relevant Codex task history and retrieve verified context before continuing."

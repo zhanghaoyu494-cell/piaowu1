@@ -7,6 +7,8 @@ name = "local-ai-memory"
 version = "0.2.0"
 description = "Local-first, source-grounded memory for AI assistants"
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Local AI Memory contributors" }]
 requires-python = ">=3.11"
 dependencies = [
   "cryptography>=43,<47",

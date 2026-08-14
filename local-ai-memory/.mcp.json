@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "local-ai-memory": {
+      "command": "python",
+      "args": [
+        "-m",
+        "local_ai_memory.mcp_server"
+      ],
+      "tool_timeout_sec": 120
+    }
+  }
+}
