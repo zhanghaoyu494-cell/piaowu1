@@ -32,6 +32,82 @@ class MemoryServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.remember("密码 password=super-secret-value")
 
+    def test_remember_validates_kind_and_sensitivity(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported memory kind"):
+            self.service.remember("Ordinary fact", kind="not-a-real-kind")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unsupported memory sensitivity"):
+            self.service.remember("Ordinary fact", sensitivity="anything")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "high-sensitivity"):
+            self.service.remember(
+                "Internal compensation plan will start next month",
+                sensitivity="high",
+            )
+
+        database_bytes = b"".join(
+            path.read_bytes()
+            for path in self.home.glob("memory.sqlite3*")
+            if path.is_file()
+        )
+        self.assertNotIn(b"Internal compensation plan", database_bytes)
+
+    def test_personal_data_cannot_be_downgraded(self) -> None:
+        memory = self.service.remember(
+            "Contact user@example.com for the approved process",
+            sensitivity="normal",
+        )
+        self.assertEqual(memory["sensitivity"], "personal")
+        self.assertIn("[REDACTED_EMAIL]", memory["content"])
+
+    def test_delete_memory_removes_plaintext_from_database_files(self) -> None:
+        marker = "LAM-SECURE-DELETE-MARKER-20260819"
+        with self.service.database.connect() as connection:
+            self.assertEqual(connection.execute("PRAGMA secure_delete").fetchone()[0], 1)
+            fts_config = dict(
+                connection.execute(
+                    "SELECT k, v FROM memories_fts_config"
+                ).fetchall()
+            )
+        self.assertEqual(fts_config.get("secure-delete"), 1)
+        memory = self.service.remember(marker, kind="fact")
+        self.assertTrue(self.service.delete_memory(memory["id"]))
+        database_bytes = b"".join(
+            path.read_bytes()
+            for path in self.home.glob("memory.sqlite3*")
+            if path.is_file()
+        )
+        self.assertNotIn(marker.encode(), database_bytes)
+        self.assertEqual(self.service.search(marker), [])
+
+    def test_delete_conversation_removes_raw_plaintext_from_database_files(self) -> None:
+        raw_marker = "LAM-RAW-DELETE-MARKER-20260819"
+        import_path = Path(self.temporary_directory.name) / "delete-test.json"
+        import_path.write_text(
+            json.dumps(
+                {
+                    "id": "delete-conversation",
+                    "messages": [
+                        {
+                            "id": "delete-message",
+                            "role": "assistant",
+                            "content": raw_marker,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.service.import_file(import_path, "test", "delete-project")
+        conversation_id = self.service.list_conversations(project="delete-project")[0][
+            "id"
+        ]
+        self.assertTrue(self.service.delete_conversation(conversation_id)["deleted"])
+        database_bytes = b"".join(
+            path.read_bytes()
+            for path in self.home.glob("memory.sqlite3*")
+            if path.is_file()
+        )
+        self.assertNotIn(raw_marker.encode(), database_bytes)
+
     def test_import_extract_review_and_source(self) -> None:
         import_path = Path(self.temporary_directory.name) / "conversation.json"
         import_path.write_text(

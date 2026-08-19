@@ -1,10 +1,59 @@
 # Local AI Memory
 
-Local AI Memory 是一个仅面向 Codex 的本地长期记忆插件。
+Local AI Memory 是一个仅面向 Codex 的本地长期记忆插件。它让 Codex 能够在不同任务之间延续项目背景，而不是每次新建任务后都从零开始。
 
 安装后，Codex 可以自动发现并增量读取过去的 Codex 任务，从中提取项目决策、用户偏好、约束、解决方案、待办和事实，并在以后处理相关工作时自动检索这些知识。整个过程不要求用户导出、上传或手工导入聊天记录。
 
 > 当前版本只处理 `kind=codex` 的 Codex 任务。它不会读取普通 ChatGPT Quick chat、Claude、Trae、CodeBuddy、浏览器历史或其他应用的数据。
+
+| 项目属性 | 当前情况 |
+| --- | --- |
+| 当前版本 | `0.3.1` |
+| 运行方式 | Codex Skill + 本地 MCP stdio 服务 |
+| 数据库 | 本机 SQLite + FTS5 |
+| 原始消息保护 | AES-256-GCM；Windows 主密钥由 DPAPI 保护 |
+| 支持范围 | 仅 Codex 历史任务 |
+| 当前质量状态 | 18 项自动化测试、Ruff、Skill/Plugin 校验和构建均通过 |
+
+## 它解决什么问题
+
+Codex 的每个任务都有自己的上下文。任务结束或新建任务后，之前讨论过的技术决策、排查结论、用户偏好和待办事项不会天然成为新任务的长期记忆。
+
+Local AI Memory 在本机建立一层可核验的长期记忆：
+
+- 自动发现过去的 Codex 任务，不要求手工导出聊天。
+- 保存原始来源，同时把可复用内容提取为候选知识。
+- 只有用户明确确认的知识才默认参与后续检索。
+- 在新任务中先查本地记忆，必要时再回到原始 Codex 任务核验。
+- 允许用户查看、确认、拒绝和删除记忆，不把数据库控制权交给云端服务。
+
+它不是云端聊天备份服务，也不是监控所有 AI 软件的后台程序。当前版本不会自动读取 ChatGPT、Claude、Trae、CodeBuddy 或浏览器数据，也不支持跨设备自动同步。
+
+## 最短使用流程
+
+完成安装后，在一个新建的 Codex 任务中依次输入：
+
+```text
+使用 $local-ai-memory 检查本地记忆服务是否正常。
+```
+
+```text
+使用 $local-ai-memory 完整同步我的 Codex 历史任务。只处理 Codex 任务，不读取工具输出。
+```
+
+同步完成后即可正常提问，例如：
+
+```text
+我们之前为这个项目确定了哪些技术约束？请附上来源任务。
+```
+
+如果需要永久保存一条明确结论：
+
+```text
+请记住：这个项目所有时间字段统一使用 UTC。
+```
+
+后续章节包含完整安装、日常使用、安全边界、命令行和故障排查说明。
 
 ## 发布方式
 
@@ -137,6 +186,47 @@ Codex 会把插件注册到当前用户的个人 Marketplace。仓库已经包�
 - `memory_delete`
 - `memory_stats`
 - `memory_consolidate`
+
+最后调用 `memory_stats`，确认返回结果包含：
+
+```json
+{
+  "plugin_version": "0.3.1"
+}
+```
+
+如果没有 `plugin_version`，或者版本不是 `0.3.1`，说明当前任务仍连接升级前的 MCP 进程。重新安装或更新个人插件，然后新建 Codex 任务再检查。
+
+## 从旧版本升级
+
+进入克隆后的仓库目录，并使用 MCP 配置中同一个 Python 解释器升级：
+
+```powershell
+cd <克隆后的 local-ai-memory 目录>
+python -m pip install --user --upgrade .
+```
+
+如果 `.mcp.json` 使用虚拟环境中的 Python，则运行：
+
+```powershell
+.\.venv\Scripts\python -m pip install --upgrade -e .
+```
+
+然后在以该仓库为项目的 Codex 任务中输入：
+
+```text
+使用 $plugin-creator 更新当前 local-ai-memory 个人插件，刷新 cachebuster，验证插件并重新安装。不要修改插件功能代码。
+```
+
+升级完成后：
+
+1. 关闭或停止继续使用安装前打开的旧任务。
+2. 新建一个 Codex 任务。
+3. 调用 `memory_stats`。
+4. 确认 `plugin_version` 为 `0.3.1`。
+5. 再测试保存、删除或完整同步。
+
+`0.3.1` 增加了 SQLite/FTS5 安全删除、WAL 截断、数据库压缩和运行版本自检。升级不会清空已有数据库，也不会重新生成主密钥。
 
 ## 首次同步
 
@@ -322,6 +412,9 @@ python -m local_ai_memory.cli search "供应商查询" --include-candidates
 python -m local_ai_memory.cli remember "该项目统一使用 Python 3.12" --project "my-project" --kind constraint
 ```
 
+`--kind` 只接受 `decision`、`preference`、`constraint`、`solution`、`todo`、`fact`。
+可以用 `--sensitivity normal|personal|high` 显式标记敏感级别；`high` 内容会被拒绝，不会写入可搜索明文索引。检测到的个人信息会先脱敏，并且不能通过显式传入 `normal` 降级。
+
 ### 查看候选知识
 
 ```powershell
@@ -441,6 +534,8 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 - 非 Windows 系统当前把主密钥保存在权限为 `0600` 的本地文件中，不提供操作系统密钥环保护；公开使用前应评估本机威胁模型。
 - 为支持 SQLite 全文检索，经过敏感信息清洗的派生知识会以本地明文索引保存。
 - 数据库、主密钥和 Scheduled task 都保存在本机；不要把整个数据目录上传到公共仓库或云盘。
+- SQLite 普通表和 FTS5 索引均启用安全删除。显式删除记忆或任务副本后，服务会截断 WAL 并压缩数据库，降低已删除明文残留在空闲页中的风险。
+- `memory_stats` 会返回当前 MCP 进程的 `plugin_version`。更新插件后应新建 Codex 任务，并确认运行版本与仓库版本一致。
 
 ### 内容安全
 
@@ -456,6 +551,12 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 - 身份证号码。
 
 自动检测无法保证覆盖所有私密数据。不要主动要求系统记住凭证或个人敏感信息。
+
+`memory_remember` 只接受 `normal`、`personal` 和 `high` 三种敏感等级：
+
+- 检测到的个人信息会先脱敏，再以 `personal` 等级进入搜索索引。
+- 调用方不能通过显式传入 `normal` 降低系统检测出的敏感等级。
+- 显式标记或自动判定为 `high` 的内容会被直接拒绝，不进入可搜索的明文知识库。
 
 ## 同步策略
 
@@ -502,7 +603,7 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 | `memory_conversations` | 查看已同步任务的元数据 |
 | `memory_delete_conversation` | 删除一个任务的本地加密副本 |
 | `memory_source` | 解密并核验一条原始来源消息 |
-| `memory_stats` | 查看任务、消息和记忆数量 |
+| `memory_stats` | 查看任务、消息、记忆数量和当前运行插件版本 |
 | `memory_consolidate` | 处理未完成消息并优化本地索引 |
 
 详细参数和同步约定见：
@@ -636,7 +737,7 @@ cd <克隆后的 local-ai-memory 目录>
 构建产物位于：
 
 ```text
-dist\local_ai_memory-0.2.0-py3-none-any.whl
+dist\local_ai_memory-0.3.1-py3-none-any.whl
 ```
 
 ### 更新本地插件缓存版本
@@ -649,14 +750,15 @@ dist\local_ai_memory-0.2.0-py3-none-any.whl
 
 更新后重新安装插件，并新建 Codex 任务进行验证。
 
-### 2026-08-14 详细测试结果
+### 0.3.1 验证结果
 
-本版本已通过 13 项自动化测试，覆盖：
+本版本已通过 18 项自动化测试，覆盖：
 
-- 加密往返、敏感信息识别和数据库明文字节检查。
+- 加密往返、敏感信息识别、数据库明文字节检查、普通表/FTS 安全删除、WAL 清理和首次并发密钥创建。
 - Codex-only 来源过滤、活动任务跳过、多页游标完整性和零导入增量同步。
-- MCP stdio 启动、13 个工具发现、任务同步、幂等、增量版本和删除闭环。
+- MCP stdio 启动、13 个工具发现、安全 annotations、任务同步、幂等、增量版本和删除闭环。
 - 明确“请记住”直接确认、普通知识候选审核、来源消息解密回溯和密钥拒绝。
+- `kind`、`sensitivity` 枚举校验、高敏感内容拒绝和个人信息不可降级。
 - Markdown 强调符清理、冒号结尾残句过滤和助手过程性承诺过滤。
 
 同时使用 2 个真实 Codex 任务进行了人工桥接端到端复测：
@@ -670,14 +772,61 @@ dist\local_ai_memory-0.2.0-py3-none-any.whl
 测试命令的当前结果：
 
 ```text
-13 tests passed
+18 tests passed
 Ruff passed
 Skill validation passed
 Plugin validation passed
-Wheel build passed
+Wheel and source distribution builds passed
 ```
 
 MCP 依赖当前会输出一条 Pydantic `IncompleteFieldDefinitionWarning`。它来自第三方依赖的未解析前向引用，不影响工具发现、调用结果或上述测试通过状态。
+
+## 上传 GitHub 前检查
+
+当前 `local-ai-memory` 目录是独立 Git 仓库。首次上传或更新 GitHub 前，先在仓库目录执行：
+
+```powershell
+git status --short
+.\.venv\Scripts\python -m unittest discover -s tests -v
+.\.venv\Scripts\python -m ruff check .
+.\.venv\Scripts\python -m build
+```
+
+如果修改过 Skill 或插件配置，再执行：
+
+```powershell
+.\.venv\Scripts\python "$env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py" skills\local-ai-memory
+.\.venv\Scripts\python "$env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py" .
+```
+
+确认以下文件不会进入提交：
+
+- `.venv\`、构建缓存和 `dist\`。
+- `memory.sqlite3`、`memory.sqlite3-wal`、`memory.sqlite3-shm`。
+- `master.key`。
+- 真实聊天导出、命令日志、截图或数据库备份。
+- API Key、Token、Cookie、密码和私钥。
+- 为本机修改的 Python 绝对路径或个人目录路径。
+
+可以使用下面的命令检查即将提交的内容：
+
+```powershell
+git status --short
+git diff --check
+git diff --cached --stat
+```
+
+首次发布 GitHub 时，替换仓库地址后执行：
+
+```powershell
+git add .
+git commit -m "feat: release local-ai-memory 0.3.1"
+git branch -M main
+git remote add origin <你的 GitHub 仓库 URL>
+git push -u origin main
+```
+
+推送前必须人工检查暂存内容。不要仅依赖 `.gitignore` 判断是否安全。
 
 ## 当前限制
 
@@ -721,12 +870,14 @@ local-ai-memory\
 │   ├── agents\openai.yaml
 │   └── references\tool-contracts.md
 └── tests\
+    ├── test_extractor.py
+    ├── test_mcp_stdio.py
     ├── test_security.py
     └── test_service.py
 ```
 
 ## 版本
 
-当前 Python 包版本：`0.2.0`。
+当前 Python 包和仓库插件版本：`0.3.1`。
 
-当前插件采用 `0.2.0+codex.<cachebuster>` 形式，在本地开发更新时通过 cachebuster 强制 Codex 重新加载插件内容。
+个人插件开发副本采用 `0.3.1+codex.<cachebuster>` 形式，在本地更新时通过 cachebuster 强制 Codex 重新加载插件内容。仓库中的正式版本仍保持标准的 `0.3.1`。

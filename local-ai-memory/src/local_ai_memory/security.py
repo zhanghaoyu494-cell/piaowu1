@@ -4,6 +4,7 @@ import ctypes
 import hashlib
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,29 +112,59 @@ class RawMessageCipher:
         self._cipher = AESGCM(key)
 
     @classmethod
+    def _decode_stored_key(cls, stored: bytes) -> bytes:
+        if stored.startswith(cls._DPAPI_PREFIX):
+            return _dpapi_unprotect(stored[len(cls._DPAPI_PREFIX) :])
+        if stored.startswith(cls._PLAIN_PREFIX):
+            return stored[len(cls._PLAIN_PREFIX) :]
+        raise ValueError("Unsupported key file format")
+
+    @classmethod
     def load_or_create(cls, key_path: Path) -> RawMessageCipher:
         key_path.parent.mkdir(parents=True, exist_ok=True)
-        if key_path.exists():
-            stored = key_path.read_bytes()
-            if stored.startswith(cls._DPAPI_PREFIX):
-                key = _dpapi_unprotect(stored[len(cls._DPAPI_PREFIX) :])
-            elif stored.startswith(cls._PLAIN_PREFIX):
-                key = stored[len(cls._PLAIN_PREFIX) :]
+        last_read_error: OSError | ValueError | None = None
+        for _ in range(100):
+            try:
+                return cls(cls._decode_stored_key(key_path.read_bytes()))
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError) as error:
+                last_read_error = error
+                time.sleep(0.01)
+                continue
+
+            key = AESGCM.generate_key(bit_length=256)
+            if os.name == "nt":
+                stored = cls._DPAPI_PREFIX + _dpapi_protect(key)
             else:
-                raise ValueError("Unsupported key file format")
+                stored = cls._PLAIN_PREFIX + key
+            try:
+                descriptor = os.open(
+                    key_path,
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                    0o600,
+                )
+            except FileExistsError:
+                time.sleep(0.01)
+                continue
+
+            try:
+                with os.fdopen(descriptor, "wb") as key_file:
+                    key_file.write(stored)
+                    key_file.flush()
+                    os.fsync(key_file.fileno())
+            except BaseException:
+                key_path.unlink(missing_ok=True)
+                raise
+            try:
+                key_path.chmod(0o600)
+            except OSError:
+                pass
             return cls(key)
 
-        key = AESGCM.generate_key(bit_length=256)
-        if os.name == "nt":
-            stored = cls._DPAPI_PREFIX + _dpapi_protect(key)
-        else:
-            stored = cls._PLAIN_PREFIX + key
-        key_path.write_bytes(stored)
-        try:
-            key_path.chmod(0o600)
-        except OSError:
-            pass
-        return cls(key)
+        if last_read_error is not None:
+            raise ValueError("Master key file did not become readable") from last_read_error
+        raise TimeoutError("Timed out waiting for concurrent master key creation")
 
     def encrypt(self, text: str) -> bytes:
         nonce = os.urandom(12)

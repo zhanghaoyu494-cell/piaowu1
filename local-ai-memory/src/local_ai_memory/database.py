@@ -111,11 +111,18 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            try:
+                connection.execute(
+                    "INSERT INTO memories_fts(memories_fts, rank) VALUES ('secure-delete', 1)"
+                )
+            except sqlite3.OperationalError:
+                pass
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA secure_delete = ON")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA busy_timeout = 30000")
         return connection
@@ -139,3 +146,9 @@ class Database:
                 "INSERT INTO memories_fts(memories_fts) VALUES ('optimize')"
             )
             connection.execute("PRAGMA optimize")
+
+    def secure_cleanup(self) -> None:
+        with self.connect() as connection:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            connection.execute("VACUUM")
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")

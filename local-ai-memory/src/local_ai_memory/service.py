@@ -6,7 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .codex_adapter import parse_codex_thread_page
 from .config import Settings
@@ -15,6 +15,11 @@ from .extractor import HeuristicExtractor, MemoryCandidate
 from .ingestion import ImportedConversation, load_conversations
 from .security import RawMessageCipher, content_hash, redact_sensitive
 from .text import fts_query, normalize_text, search_document
+
+MemoryKind = Literal["decision", "preference", "constraint", "solution", "todo", "fact"]
+Sensitivity = Literal["normal", "personal", "high"]
+MEMORY_KINDS = ("decision", "preference", "constraint", "solution", "todo", "fact")
+SENSITIVITIES = ("normal", "personal", "high")
 
 
 def utc_now() -> str:
@@ -293,6 +298,16 @@ class MemoryService:
         project: str,
         message_id: str | None,
     ) -> bool:
+        if candidate.kind not in MEMORY_KINDS:
+            raise ValueError(f"Unsupported memory kind: {candidate.kind}")
+        if candidate.sensitivity not in SENSITIVITIES:
+            raise ValueError(
+                f"Unsupported memory sensitivity: {candidate.sensitivity}"
+            )
+        if candidate.sensitivity == "high":
+            raise ValueError(
+                "Refusing to place high-sensitivity content in the searchable knowledge base"
+            )
         normalized = normalize_text(candidate.content)
         fingerprint = content_hash(f"{project}\0{candidate.kind}\0{normalized}")
         existing = connection.execute(
@@ -357,22 +372,37 @@ class MemoryService:
         self,
         content: str,
         project: str = "",
-        kind: str = "fact",
-        sensitivity: str | None = None,
+        kind: MemoryKind = "fact",
+        sensitivity: Sensitivity | None = None,
     ) -> dict[str, Any]:
-        redaction = redact_sensitive(content.strip())
-        if not content.strip():
+        content = content.strip()
+        if not content:
             raise ValueError("Memory content cannot be empty")
+        if kind not in MEMORY_KINDS:
+            raise ValueError(f"Unsupported memory kind: {kind}")
+        if sensitivity is not None and sensitivity not in SENSITIVITIES:
+            raise ValueError(f"Unsupported memory sensitivity: {sensitivity}")
+
+        redaction = redact_sensitive(content)
         if redaction.secret_detected:
             raise ValueError(
                 "Refusing to place a detected secret in the searchable knowledge base"
+            )
+        sensitivity_rank = {"normal": 0, "personal": 1, "high": 2}
+        effective_sensitivity = max(
+            (sensitivity or "normal", redaction.sensitivity),
+            key=sensitivity_rank.__getitem__,
+        )
+        if effective_sensitivity == "high":
+            raise ValueError(
+                "Refusing to place high-sensitivity content in the searchable knowledge base"
             )
         candidate = MemoryCandidate(
             content=redaction.text,
             kind=kind,
             confidence=1.0,
             status="confirmed",
-            sensitivity=sensitivity or redaction.sensitivity,
+            sensitivity=effective_sensitivity,
             source_authority="user",
         )
         with self.database.transaction() as connection:
@@ -526,7 +556,10 @@ class MemoryService:
             cursor = connection.execute(
                 "DELETE FROM memories WHERE id = ?", (memory_id,)
             )
-        return bool(cursor.rowcount)
+        deleted = bool(cursor.rowcount)
+        if deleted:
+            self.database.secure_cleanup()
+        return deleted
 
     def list_conversations(
         self, source: str | None = None, project: str | None = None, limit: int = 100
@@ -591,11 +624,14 @@ class MemoryService:
                     """,
                     (memory_id,),
                 ).rowcount
-        return {
+        result = {
             "deleted": bool(deleted),
             "messages_deleted": message_count if deleted else 0,
             "orphaned_memories_deleted": orphaned_deleted,
         }
+        if deleted:
+            self.database.secure_cleanup()
+        return result
 
     def consolidate(self) -> dict[str, int]:
         with self.database.connect() as connection:

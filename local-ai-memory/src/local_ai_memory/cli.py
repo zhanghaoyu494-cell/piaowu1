@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from .config import Settings
-from .service import MemoryService
+from .service import MEMORY_KINDS, SENSITIVITIES, MemoryService
 
 
 def print_json(value: Any) -> None:
@@ -25,7 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
     remember_parser = subparsers.add_parser("remember", help="Store a confirmed memory")
     remember_parser.add_argument("content")
     remember_parser.add_argument("--project", default="")
-    remember_parser.add_argument("--kind", default="fact")
+    remember_parser.add_argument("--kind", choices=MEMORY_KINDS, default="fact")
+    remember_parser.add_argument("--sensitivity", choices=SENSITIVITIES)
 
     search_parser = subparsers.add_parser("search", help="Search confirmed memories")
     search_parser.add_argument("query")
@@ -94,7 +95,12 @@ def main(argv: list[str] | None = None) -> None:
         print_json(service.stats())
     elif arguments.command == "remember":
         print_json(
-            service.remember(arguments.content, arguments.project, arguments.kind)
+            service.remember(
+                arguments.content,
+                arguments.project,
+                arguments.kind,
+                arguments.sensitivity,
+            )
         )
     elif arguments.command == "search":
         print_json(

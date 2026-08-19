@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,9 +38,7 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
         environment = dict(os.environ)
         environment["LOCAL_AI_MEMORY_HOME"] = str(data_directory)
         server = StdioServerParameters(
-            command=str(
-                Path(__file__).parents[1] / ".venv" / "Scripts" / "python.exe"
-            ),
+            command=sys.executable,
             args=["-m", "local_ai_memory.mcp_server"],
             cwd=str(Path(__file__).parents[1]),
             env=environment,
@@ -51,6 +50,35 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     await session.initialize()
                     tools = await session.list_tools()
                     self.assertEqual(len(tools.tools), 13)
+                    annotations = {
+                        tool.name: tool.annotations for tool in tools.tools
+                    }
+                    read_only_tools = {
+                        "memory_search",
+                        "memory_candidates",
+                        "memory_conversations",
+                        "memory_source",
+                        "memory_stats",
+                        "memory_codex_sync_plan",
+                    }
+                    destructive_tools = {
+                        "memory_delete",
+                        "memory_delete_conversation",
+                    }
+                    for name in read_only_tools:
+                        self.assertTrue(annotations[name].readOnlyHint)
+                        self.assertFalse(annotations[name].destructiveHint)
+                        self.assertFalse(annotations[name].openWorldHint)
+                    for name in destructive_tools:
+                        self.assertFalse(annotations[name].readOnlyHint)
+                        self.assertTrue(annotations[name].destructiveHint)
+                        self.assertFalse(annotations[name].openWorldHint)
+                    for name in set(annotations) - read_only_tools - destructive_tools:
+                        self.assertFalse(annotations[name].readOnlyHint)
+                        self.assertFalse(annotations[name].destructiveHint)
+                        self.assertFalse(annotations[name].openWorldHint)
+                    initial_stats = await self.call(session, "memory_stats")
+                    self.assertEqual(initial_stats["plugin_version"], "0.3.1")
 
                     threads = [
                         {
@@ -224,6 +252,21 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertTrue(secret_result.isError)
 
+                    high_sensitivity_result = await session.call_tool(
+                        "memory_remember",
+                        {
+                            "content": "Internal compensation plan",
+                            "sensitivity": "high",
+                        },
+                    )
+                    self.assertTrue(high_sensitivity_result.isError)
+
+                    invalid_kind_result = await session.call_tool(
+                        "memory_remember",
+                        {"content": "Ordinary fact", "kind": "not-a-real-kind"},
+                    )
+                    self.assertTrue(invalid_kind_result.isError)
+
                     multi_thread = {
                         "id": "multi-page-thread",
                         "kind": "codex",
@@ -276,6 +319,7 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                             "memories": 0,
                             "confirmed": 0,
                             "candidates": 0,
+                            "plugin_version": "0.3.1",
                         },
                     )
 

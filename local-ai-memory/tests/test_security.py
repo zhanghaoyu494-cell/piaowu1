@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from local_ai_memory.security import RawMessageCipher, redact_sensitive
@@ -24,6 +26,22 @@ class SecurityTests(unittest.TestCase):
         self.assertNotIn("sk-abcdefghijklmnopqrstuvwxyz", result.text)
         self.assertIn("[REDACTED_EMAIL]", result.text)
         self.assertIn("[REDACTED_PHONE]", result.text)
+
+    def test_concurrent_first_use_creates_one_master_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            key_path = Path(directory) / "key"
+            barrier = threading.Barrier(16)
+
+            def load_cipher() -> RawMessageCipher:
+                barrier.wait()
+                return RawMessageCipher.load_or_create(key_path)
+
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                ciphers = list(executor.map(lambda _: load_cipher(), range(16)))
+
+            payload = ciphers[0].encrypt("shared concurrent key")
+            for cipher in ciphers:
+                self.assertEqual(cipher.decrypt(payload), "shared concurrent key")
 
 
 if __name__ == "__main__":
