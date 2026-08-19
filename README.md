@@ -20,7 +20,7 @@ local-ai-memory\
 
 ## 下载
 
-前往 [GitHub Releases](https://github.com/zhanghaoyu494-cell/piaowu1/releases/latest) 下载最新发行版。
+前往 [GitHub Releases](https://github.com/zhanghaoyu494-cell/local-ai-memory/releases/latest) 下载最新发行版。
 
 - 完整安装推荐下载 `Source code (zip)`，其中包含 Codex Plugin、Skill、MCP 配置和 Python 服务源码。
 - `local_ai_memory-0.3.1-py3-none-any.whl` 只安装 Python 服务，不能单独替代完整插件目录。
