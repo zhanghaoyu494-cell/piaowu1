@@ -117,6 +117,14 @@ Local AI Memory 把 Codex 任务视为原始来源，把本地数据库视为可
 
 ## 安装
 
+### 选择下载方式
+
+前往 [GitHub Releases](https://github.com/zhanghaoyu494-cell/piaowu1/releases/latest) 下载最新发行版：
+
+- 完整安装推荐下载 `Source code (zip)` 并解压，其中包含 `.codex-plugin`、`.mcp.json`、`skills` 和 Python 服务源码。
+- `local_ai_memory-0.3.1-py3-none-any.whl` 只包含 Python 服务，适合升级 Python 包，但不能单独完成 Codex 插件注册。
+- 也可以使用下面的 `git clone` 方式获取完整项目。
+
 ### 1. 克隆并安装本地 Python 服务
 
 在 PowerShell 中运行：

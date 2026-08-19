@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: local-ai-memory
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: local-ai-memory/pyproject.toml
+
+      - name: Install package and development tools
+        run: python -m pip install -e . ruff build hatchling
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          if (gh release view $env:GITHUB_REF_NAME 2>$null) {
+            gh release upload $env:GITHUB_REF_NAME dist/* --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME dist/* --title $env:GITHUB_REF_NAME --generate-notes
+          }
