@@ -25,6 +25,9 @@ jobs:
           cache: pip
           cache-dependency-path: local-ai-memory/pyproject.toml
 
+      - name: Upgrade pip and setuptools
+        run: python -m pip install --upgrade pip setuptools
+
       - name: Install package and development tools
         run: python -m pip install -e . ruff build hatchling bandit pip-audit
 
