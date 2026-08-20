@@ -14,9 +14,7 @@ from mcp.client.stdio import stdio_client
 
 def decode_result(result: Any) -> Any:
     if result.isError:
-        message = "\n".join(
-            getattr(item, "text", "") for item in result.content
-        )
+        message = "\n".join(getattr(item, "text", "") for item in result.content)
         raise AssertionError(f"MCP tool failed: {message}")
     structured = result.structuredContent
     if structured is not None:
@@ -31,9 +29,7 @@ def decode_result(result: Any) -> Any:
 
 class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_stdio_end_to_end_workflow(self) -> None:
-        temporary_directory = tempfile.TemporaryDirectory(
-            prefix="local-ai-memory-e2e-"
-        )
+        temporary_directory = tempfile.TemporaryDirectory(prefix="local-ai-memory-e2e-")
         data_directory = Path(temporary_directory.name)
         environment = dict(os.environ)
         environment["LOCAL_AI_MEMORY_HOME"] = str(data_directory)
@@ -50,9 +46,7 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     await session.initialize()
                     tools = await session.list_tools()
                     self.assertEqual(len(tools.tools), 13)
-                    annotations = {
-                        tool.name: tool.annotations for tool in tools.tools
-                    }
+                    annotations = {tool.name: tool.annotations for tool in tools.tools}
                     read_only_tools = {
                         "memory_search",
                         "memory_candidates",
@@ -78,7 +72,7 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(annotations[name].destructiveHint)
                         self.assertFalse(annotations[name].openWorldHint)
                     initial_stats = await self.call(session, "memory_stats")
-                    self.assertEqual(initial_stats["plugin_version"], "0.3.1")
+                    self.assertEqual(initial_stats["plugin_version"], "0.3.2")
 
                     threads = [
                         {
@@ -204,16 +198,10 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     source = await self.call(
                         session,
                         "memory_source",
-                        {
-                            "message_id": utc_results[0]["sources"][0][
-                                "message_id"
-                            ]
-                        },
+                        {"message_id": utc_results[0]["sources"][0]["message_id"]},
                     )
                     self.assertIn("统一使用 UTC", source["content"])
-                    self.assertEqual(
-                        source["conversation_external_id"], "e2e-thread"
-                    )
+                    self.assertEqual(source["conversation_external_id"], "e2e-thread")
 
                     candidates = await self.call(
                         session,
@@ -319,7 +307,7 @@ class McpStdioIntegrationTests(unittest.IsolatedAsyncioTestCase):
                             "memories": 0,
                             "confirmed": 0,
                             "candidates": 0,
-                            "plugin_version": "0.3.1",
+                            "plugin_version": "0.3.2",
                         },
                     )
 

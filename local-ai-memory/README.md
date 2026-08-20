@@ -8,12 +8,12 @@ Local AI Memory 是一个仅面向 Codex 的本地长期记忆插件。它让 Co
 
 | 项目属性 | 当前情况 |
 | --- | --- |
-| 当前版本 | `0.3.1` |
+| 当前版本 | `0.3.2` |
 | 运行方式 | Codex Skill + 本地 MCP stdio 服务 |
 | 数据库 | 本机 SQLite + FTS5 |
 | 原始消息保护 | AES-256-GCM；Windows 主密钥由 DPAPI 保护 |
 | 支持范围 | 仅 Codex 历史任务 |
-| 当前质量状态 | 18 项自动化测试、Ruff、Skill/Plugin 校验和构建均通过 |
+| 当前质量状态 | 37 项自动化测试、92% 分支覆盖率、Ruff、Bandit、依赖审计、Skill/Plugin 校验和构建均通过 |
 
 ## 它解决什么问题
 
@@ -76,10 +76,10 @@ Local AI Memory 在本机建立一层可核验的长期记忆：
 - Windows 上使用当前登录用户的 DPAPI 保护本地主密钥。
 - 自动提取的知识默认进入候选区，不会直接作为可靠事实参与普通检索。
 - 用户明确说“请记住”或主动确认的内容会成为已确认记忆。
-- 使用 SQLite FTS5 和中文检索词在本地搜索。
+- 使用 SQLite FTS5、优先多词精确匹配、受控时区同义词和宽松回退在本地搜索。
 - 每条记忆都保留来源任务 ID、来源消息 ID、时间和来源链接。
 - 支持确认、拒绝、核验和删除记忆，也支持删除完整的本地任务副本。
-- 支持通过 Codex Scheduled task 每天凌晨 03:00 自动同步。
+- 支持由 Codex Scheduled task 在每天凌晨 03:00 调用 Skill 完成增量同步。
 
 ## 工作原理
 
@@ -113,7 +113,7 @@ Local AI Memory 把 Codex 任务视为原始来源，把本地数据库视为可
 - Codex 桌面应用。
 - Python 3.11 或更高版本。
 - 安装插件后需要新建一个 Codex 任务，让新任务加载 Skill 和 MCP 工具。
-- 凌晨自动同步时，电脑需要保持开机，并且 Codex 桌面应用需要正在运行。
+- 凌晨自动同步依赖 Codex Scheduled task；电脑需要保持开机，Codex 桌面应用需要正在运行，并且该定时任务必须能加载本插件及 Codex 任务工具。
 
 ## 安装
 
@@ -122,7 +122,7 @@ Local AI Memory 把 Codex 任务视为原始来源，把本地数据库视为可
 前往 [GitHub Releases](https://github.com/zhanghaoyu494-cell/local-ai-memory/releases/latest) 下载最新发行版：
 
 - 完整安装推荐下载 `Source code (zip)` 并解压，其中包含 `.codex-plugin`、`.mcp.json`、`skills` 和 Python 服务源码。
-- `local_ai_memory-0.3.1-py3-none-any.whl` 只包含 Python 服务，适合升级 Python 包，但不能单独完成 Codex 插件注册。
+- `local_ai_memory-0.3.2-py3-none-any.whl` 只包含 Python 服务，适合升级 Python 包，但不能单独完成 Codex 插件注册。
 - 也可以使用下面的 `git clone` 方式获取完整项目。
 
 ### 1. 克隆并安装本地 Python 服务
@@ -199,11 +199,11 @@ Codex 会把插件注册到当前用户的个人 Marketplace。仓库已经包�
 
 ```json
 {
-  "plugin_version": "0.3.1"
+  "plugin_version": "0.3.2"
 }
 ```
 
-如果没有 `plugin_version`，或者版本不是 `0.3.1`，说明当前任务仍连接升级前的 MCP 进程。重新安装或更新个人插件，然后新建 Codex 任务再检查。
+如果没有 `plugin_version`，或者版本不是 `0.3.2`，说明当前任务仍连接升级前的 MCP 进程。重新安装或更新个人插件，然后新建 Codex 任务再检查。
 
 ## 从旧版本升级
 
@@ -231,10 +231,10 @@ python -m pip install --user --upgrade .
 1. 关闭或停止继续使用安装前打开的旧任务。
 2. 新建一个 Codex 任务。
 3. 调用 `memory_stats`。
-4. 确认 `plugin_version` 为 `0.3.1`。
+4. 确认 `plugin_version` 为 `0.3.2`。
 5. 再测试保存、删除或完整同步。
 
-`0.3.1` 增加了 SQLite/FTS5 安全删除、WAL 截断、数据库压缩和运行版本自检。升级不会清空已有数据库，也不会重新生成主密钥。
+`0.3.2` 修复了加密依赖漏洞、FTS5 删除残留、删除任务后同步游标残留、AWS/中文凭证漏检、超长记忆、请求句误抽取、近重复候选和宽泛检索，并加入安全审计 CI。升级不会清空已有数据库，也不会重新生成主密钥。
 
 ## 首次同步
 
@@ -294,6 +294,8 @@ Codex 将执行以下步骤：
 
 Skill 会调用 `memory_remember`，把它保存为已确认记忆。
 
+单条手工确认记忆最多 10,000 个字符。该上限防止异常输入拖慢索引或让数据库快速膨胀；长文档应先提炼为稳定结论。
+
 适合长期保存的内容包括：
 
 - `decision`：项目或技术决策。
@@ -350,7 +352,7 @@ Skill 会通过 `memory_source` 解密并返回对应的原始消息，同时保
 
 ## 每天凌晨 03:00 自动同步
 
-安装插件后，可以创建名为“Codex 本地记忆同步”的 Codex Scheduled task：
+插件本身不会注册 Windows 后台服务，也不会直接扫描 Codex 私有数据库。需要创建名为“Codex 本地记忆同步”的 Codex Scheduled task，由 Codex 在计划时间调用 `list_threads`、`read_thread` 和本插件工具：
 
 - 执行时间：每天凌晨 `03:00`。
 - 运行目录：选择一个本机 Codex 项目目录。
@@ -371,6 +373,7 @@ Skill 会通过 `memory_source` 解密并返回对应的原始消息，同时保
 - 电脑关机时任务无法运行。
 - Codex 桌面应用未运行时，本地任务可能无法执行。
 - 插件未安装或 MCP Python 路径失效时，任务会失败。
+- Scheduled task 中没有暴露 Codex 任务工具时，无法发现历史任务；本地 `memory_consolidate` 只能处理已经进入数据库的待处理消息，不能替代完整同步。
 - 活动任务会被跳过，等任务结束后在下一次同步中处理。
 - 如果错过凌晨 03:00，当前 Codex Scheduled task 不保证当天自动补跑；可以手动要求完整同步。
 
@@ -542,7 +545,7 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 - 非 Windows 系统当前把主密钥保存在权限为 `0600` 的本地文件中，不提供操作系统密钥环保护；公开使用前应评估本机威胁模型。
 - 为支持 SQLite 全文检索，经过敏感信息清洗的派生知识会以本地明文索引保存。
 - 数据库、主密钥和 Scheduled task 都保存在本机；不要把整个数据目录上传到公共仓库或云盘。
-- SQLite 普通表和 FTS5 索引均启用安全删除。显式删除记忆或任务副本后，服务会截断 WAL 并压缩数据库，降低已删除明文残留在空闲页中的风险。
+- SQLite 普通表和 FTS5 索引均启用安全删除。显式删除记忆或任务副本后，服务会压实 FTS 段、截断 WAL 并压缩数据库，降低已删除明文残留在空闲页中的风险。
 - `memory_stats` 会返回当前 MCP 进程的 `plugin_version`。更新插件后应新建 Codex 任务，并确认运行版本与仓库版本一致。
 
 ### 内容安全
@@ -553,7 +556,7 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 
 服务会识别并清洗常见的：
 
-- API Key、Token 和密码字段。
+- API Key、Token、AWS Access Key ID、英文或中文密码/密钥/令牌字段。
 - 电子邮箱。
 - 手机号码。
 - 身份证号码。
@@ -565,6 +568,7 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 - 检测到的个人信息会先脱敏，再以 `personal` 等级进入搜索索引。
 - 调用方不能通过显式传入 `normal` 降低系统检测出的敏感等级。
 - 显式标记或自动判定为 `high` 的内容会被直接拒绝，不进入可搜索的明文知识库。
+- 单条手工确认记忆最多 10,000 个字符，超过上限会在写入前拒绝。
 
 ## 同步策略
 
@@ -576,9 +580,13 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 
 消息使用 Codex 原始消息 ID 去重。同一页或同一任务被重复提交时，不会产生重复消息。
 
+同一项目、同一知识类型下的用户原话和 Codex 近似复述会合并为一条候选，同时保留多个来源；用户来源和更高置信度内容优先。
+
 ### 分页完整性
 
 多页任务必须从最新页开始，并严格使用上一页返回的 `nextCursor` 读取下一页。只有连续读取到 `hasMore=false`，任务版本才会被标记为同步完成。
+
+删除一个 Codex 本地任务副本时，对应的完成版本和分页进度会一并删除，因此下一次同步计划会把该任务重新识别为待同步。
 
 以下情况会拒绝同步并要求从最新页重新开始：
 
@@ -603,13 +611,13 @@ Codex 插件和 Scheduled task 必须使用相同的环境变量或默认目录�
 | `memory_codex_sync_plan` | 比较 Codex 任务版本并返回待同步任务 |
 | `memory_ingest_codex_page` | 加密并保存一页 `read_thread` 结果 |
 | `memory_search` | 搜索本地记忆，默认只返回已确认内容 |
-| `memory_remember` | 保存用户明确确认的长期记忆 |
+| `memory_remember` | 保存用户明确确认的长期记忆，单条最多 10,000 字符 |
 | `memory_candidates` | 查看自动抽取的候选知识 |
 | `memory_confirm` | 把候选知识升级为已确认记忆 |
 | `memory_reject` | 拒绝错误或无用候选 |
 | `memory_delete` | 删除一条派生记忆 |
 | `memory_conversations` | 查看已同步任务的元数据 |
-| `memory_delete_conversation` | 删除一个任务的本地加密副本 |
+| `memory_delete_conversation` | 删除一个任务的本地加密副本，并重置 Codex 同步游标 |
 | `memory_source` | 解密并核验一条原始来源消息 |
 | `memory_stats` | 查看任务、消息、记忆数量和当前运行插件版本 |
 | `memory_consolidate` | 处理未完成消息并优化本地索引 |
@@ -745,7 +753,7 @@ cd <克隆后的 local-ai-memory 目录>
 构建产物位于：
 
 ```text
-dist\local_ai_memory-0.3.1-py3-none-any.whl
+dist\local_ai_memory-0.3.2-py3-none-any.whl
 ```
 
 ### 更新本地插件缓存版本
@@ -758,16 +766,18 @@ dist\local_ai_memory-0.3.1-py3-none-any.whl
 
 更新后重新安装插件，并新建 Codex 任务进行验证。
 
-### 0.3.1 验证结果
+### 0.3.2 验证结果
 
-本版本已通过 18 项自动化测试，覆盖：
+本版本已通过 37 项自动化测试，分支覆盖率为 92%，其中原先薄弱的导入层覆盖率从 49% 提升到 96%。覆盖内容包括：
 
-- 加密往返、敏感信息识别、数据库明文字节检查、普通表/FTS 安全删除、WAL 清理和首次并发密钥创建。
+- 加密往返、AWS/中英文敏感信息识别、数据库明文字节检查、普通表/FTS 段安全删除、WAL 清理和首次并发密钥创建。
 - Codex-only 来源过滤、活动任务跳过、多页游标完整性和零导入增量同步。
 - MCP stdio 启动、13 个工具发现、安全 annotations、任务同步、幂等、增量版本和删除闭环。
 - 明确“请记住”直接确认、普通知识候选审核、来源消息解密回溯和密钥拒绝。
-- `kind`、`sensitivity` 枚举校验、高敏感内容拒绝和个人信息不可降级。
-- Markdown 强调符清理、冒号结尾残句过滤和助手过程性承诺过滤。
+- `kind`、`sensitivity` 枚举校验、高敏感内容拒绝、个人信息不可降级和 10,000 字符边界。
+- Markdown 强调符清理、请求句过滤、助手过程性承诺过滤及用户/助手近重复候选合并。
+- 多词 AND 优先检索、受控时区同义词、OR 回退和 FTS 特殊字符安全处理。
+- JSON、映射、Markdown、纯文本导入解析和 Codex 条目过滤。
 
 同时使用 2 个真实 Codex 任务进行了人工桥接端到端复测：
 
@@ -780,10 +790,10 @@ dist\local_ai_memory-0.3.1-py3-none-any.whl
 测试命令的当前结果：
 
 ```text
-18 tests passed
-Ruff passed
-Skill validation passed
-Plugin validation passed
+37 tests passed
+92% branch coverage
+Ruff, Bandit and pip-audit passed
+Skill and plugin validation passed
 Wheel and source distribution builds passed
 ```
 
@@ -797,6 +807,9 @@ MCP 依赖当前会输出一条 Pydantic `IncompleteFieldDefinitionWarning`。�
 git status --short
 .\.venv\Scripts\python -m unittest discover -s tests -v
 .\.venv\Scripts\python -m ruff check .
+.\.venv\Scripts\python -m ruff format --check src tests
+.\.venv\Scripts\python -m bandit -q -r src
+.\.venv\Scripts\python -m pip_audit
 .\.venv\Scripts\python -m build
 ```
 
@@ -828,7 +841,7 @@ git diff --cached --stat
 
 ```powershell
 git add .
-git commit -m "feat: release local-ai-memory 0.3.1"
+git commit -m "fix: release local-ai-memory 0.3.2"
 git branch -M main
 git remote add origin <你的 GitHub 仓库 URL>
 git push -u origin main
@@ -840,6 +853,7 @@ git push -u origin main
 
 - 只支持 Codex，不支持其他 AI 产品或普通 ChatGPT 聊天。
 - 当前使用 SQLite FTS5，不是向量语义检索；表达差异很大时可能漏检。
+- 当前只有小规模受控同义词，不等同于通用语义理解。
 - 知识抽取基于本地启发式规则，复杂结论需要用户确认。
 - 默认同步不包含工具输出、终端日志和文件差异。
 - 活动任务不会立即同步。
@@ -870,6 +884,7 @@ local-ai-memory\
 │   ├── extractor.py
 │   ├── ingestion.py
 │   ├── mcp_server.py
+│   ├── scheduler.py
 │   ├── security.py
 │   ├── service.py
 │   └── text.py
@@ -878,7 +893,10 @@ local-ai-memory\
 │   ├── agents\openai.yaml
 │   └── references\tool-contracts.md
 └── tests\
+    ├── test_codex_adapter.py
+    ├── test_config.py
     ├── test_extractor.py
+    ├── test_ingestion.py
     ├── test_mcp_stdio.py
     ├── test_security.py
     └── test_service.py
@@ -886,6 +904,6 @@ local-ai-memory\
 
 ## 版本
 
-当前 Python 包和仓库插件版本：`0.3.1`。
+当前 Python 包和仓库插件版本：`0.3.2`。
 
-个人插件开发副本采用 `0.3.1+codex.<cachebuster>` 形式，在本地更新时通过 cachebuster 强制 Codex 重新加载插件内容。仓库中的正式版本仍保持标准的 `0.3.1`。
+个人插件开发副本采用 `0.3.2+codex.<cachebuster>` 形式，在本地更新时通过 cachebuster 强制 Codex 重新加载插件内容。仓库中的正式版本仍保持标准的 `0.3.2`。

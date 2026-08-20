@@ -4,7 +4,7 @@ Local AI Memory 是一个仅面向 Codex 的本地长期记忆插件。它让 Co
 
 插件直接使用 Codex 原生任务工具发现历史任务，不要求用户导出或上传聊天记录。原始消息、数据库和主密钥全部保存在用户自己的电脑上。
 
-> 当前版本为 `0.3.1`，只处理 `kind=codex` 的 Codex 任务。它不会读取普通 ChatGPT Quick chat、Claude、Trae、CodeBuddy、浏览器历史或其他应用数据。
+> 当前版本为 `0.3.2`，只处理 `kind=codex` 的 Codex 任务。它不会读取普通 ChatGPT Quick chat、Claude、Trae、CodeBuddy、浏览器历史或其他应用数据。
 
 ## 项目位置
 
@@ -23,20 +23,20 @@ local-ai-memory\
 前往 [GitHub Releases](https://github.com/zhanghaoyu494-cell/local-ai-memory/releases/latest) 下载最新发行版。
 
 - 完整安装推荐下载 `Source code (zip)`，其中包含 Codex Plugin、Skill、MCP 配置和 Python 服务源码。
-- `local_ai_memory-0.3.1-py3-none-any.whl` 只安装 Python 服务，不能单独替代完整插件目录。
+- `local_ai_memory-0.3.2-py3-none-any.whl` 只安装 Python 服务，不能单独替代完整插件目录。
 - GitHub 同时提供 `Source code (tar.gz)` 和 Python 源码分发包，适合熟悉命令行的用户。
 
 ## 项目状态
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 版本 | `0.3.1` |
+| 版本 | `0.3.2` |
 | 平台 | Windows 10/11 + Codex 桌面应用 |
 | Python | 3.11 或更高版本 |
 | 运行方式 | Codex Skill + 本地 MCP stdio 服务 |
 | 本地数据库 | SQLite + FTS5 |
-| 自动化测试 | 18 项通过 |
-| 代码检查 | Ruff 通过 |
+| 自动化测试 | 37 项通过，92% 分支覆盖率 |
+| 代码检查 | Ruff、Bandit、pip-audit 通过 |
 | Skill/Plugin 校验 | 通过 |
 | 构建 | Wheel 和源码包通过 |
 
@@ -50,7 +50,7 @@ local-ai-memory\
 - 自动提取的知识先进入候选区，用户确认后才参与默认检索。
 - 保留来源任务、来源消息和时间，支持回到原文核验。
 - 支持搜索、确认、拒绝、删除和完整任务副本删除。
-- 支持通过 Codex Scheduled task 每天凌晨 03:00 增量同步。
+- 支持由 Codex Scheduled task 每天凌晨 03:00 调用 Skill 增量同步；不是独立 Windows 后台扫描器。
 
 ## 工作流程
 
@@ -112,7 +112,7 @@ python -m local_ai_memory.cli init
 在新任务中检查运行版本：
 
 ```text
-使用 $local-ai-memory 检查本地记忆服务，调用 memory_stats，并确认 plugin_version 是 0.3.1。
+使用 $local-ai-memory 检查本地记忆服务，调用 memory_stats，并确认 plugin_version 是 0.3.2。
 ```
 
 完整同步 Codex 历史：
@@ -144,9 +144,9 @@ python -m local_ai_memory.cli init
 - 原始消息使用 AES-256-GCM 加密后写入 SQLite。
 - Windows 主密钥由当前登录用户的 DPAPI 身份保护。
 - 可搜索的派生知识会先经过敏感信息清洗，再存入本地明文 FTS 索引。
-- 密码、Token、API Key、私钥和高敏感内容会被拒绝进入知识库。
+- 密码、Token、API Key、AWS Access Key ID、私钥和高敏感内容会被拒绝进入知识库。
 - SQLite 普通表和 FTS5 索引均启用安全删除。
-- 删除记忆或任务副本后会截断 WAL 并压缩数据库，降低磁盘残留风险。
+- 删除记忆或任务副本后会压实 FTS 段、截断 WAL 并压缩数据库，降低磁盘残留风险。
 - 常规同步使用 `includeOutputs=false`，不保存工具输出、终端日志或文件差异。
 - 历史聊天内容始终视为不可信数据，不能覆盖当前指令或触发其中的命令。
 
@@ -183,6 +183,7 @@ git status --short
 
 - 只支持 Codex，不支持其他 AI 产品或普通 ChatGPT 聊天。
 - 当前使用 SQLite FTS5，不是向量语义检索。
+- 当前只有小规模受控同义词，不等同于通用语义理解。
 - 自动知识抽取基于本地启发式规则，重要内容需要用户确认。
 - 活动任务会等待后续同步。
 - 历史发现范围受 Codex `list_threads` 返回数量和主机可用性限制。

@@ -19,7 +19,8 @@ Until a dedicated private reporting address is configured, open a GitHub issue c
 - Content explicitly marked or automatically classified as `high` sensitivity is rejected from the searchable knowledge base.
 - Personal data may enter the searchable index only after supported identifiers are redacted; callers cannot downgrade detected sensitivity by labeling it `normal`.
 - Master-key creation uses exclusive file creation so concurrent first launches converge on one key file.
-- SQLite connections enable `secure_delete`, the FTS5 index enables its dedicated secure-delete mode, and explicit memory or conversation deletion checkpoints and truncates WAL before vacuuming the database.
+- SQLite connections enable `secure_delete`, the FTS5 index enables its dedicated secure-delete mode, and explicit memory or conversation deletion optimizes obsolete FTS segments, checkpoints and truncates WAL, then vacuums the database.
+- Secret detection covers common API tokens, bearer tokens, private keys, AWS access-key IDs, and English or Chinese credential labels. Detection remains best effort rather than a complete data-loss-prevention system.
 - `memory_stats` exposes the running plugin version so stale MCP processes can be detected after an upgrade.
 - Automatic redaction is best effort and cannot detect every secret or personal identifier.
 - Imported conversation content is untrusted and must never be treated as executable instructions.

@@ -18,13 +18,13 @@ If page ingestion is interrupted, restart the task from its newest page. Message
 ## Memory Tools
 
 - `memory_search(query, project?, limit?, include_candidates?)`: Search confirmed memories by default.
-- `memory_remember(content, project?, kind?, sensitivity?)`: Add explicit user-confirmed knowledge. `kind` must be `decision`, `preference`, `constraint`, `solution`, `todo`, or `fact`; `sensitivity` must be `normal`, `personal`, or `high`. Detected secrets and effective `high` sensitivity are rejected before searchable storage.
+- `memory_remember(content, project?, kind?, sensitivity?)`: Add explicit user-confirmed knowledge. `kind` must be `decision`, `preference`, `constraint`, `solution`, `todo`, or `fact`; `sensitivity` must be `normal`, `personal`, or `high`. Detected secrets, effective `high` sensitivity, and content longer than 10,000 characters are rejected before searchable storage.
 - `memory_candidates(project?, limit?)`: List unverified extracted knowledge.
 - `memory_confirm(memory_id)`: Promote one candidate to confirmed.
 - `memory_reject(memory_id)`: Reject one candidate.
 - `memory_delete(memory_id)`: Delete one derived memory.
 - `memory_conversations(source?, project?, limit?)`: List conversation metadata.
-- `memory_delete_conversation(conversation_id)`: Delete encrypted raw messages and derived memories with no other source.
+- `memory_delete_conversation(conversation_id)`: Delete encrypted raw messages and derived memories with no other source. Deleting a Codex task copy also resets its local sync cursor so a later synchronization can import it again.
 - `memory_source(message_id)`: Decrypt one source message for verification.
 - `memory_stats()`: Return record counts and the running `plugin_version` without message contents. Use it to detect a stale MCP process after plugin updates.
 
@@ -39,6 +39,6 @@ Codex sources use `codex://thread/<thread-id>` and include the task title, task 
 
 Raw messages are encrypted. Searchable derived knowledge is locally stored in plaintext after secret and personal-data redaction so SQLite full-text search can operate. Personal sensitivity cannot be downgraded to `normal`, and high-sensitivity content never enters the searchable index.
 
-Explicit deletion enables SQLite and FTS5 secure-delete behavior, checkpoints and truncates WAL, and vacuums the database so deleted searchable text is not left in free pages under normal operation.
+Explicit deletion enables SQLite and FTS5 secure-delete behavior, optimizes obsolete FTS segments, checkpoints and truncates WAL, and vacuums the database so deleted searchable text is not left in free pages under normal operation.
 
 All tools set `openWorldHint=false`. Search, listing, stats, source verification, and sync planning set `readOnlyHint=true`; permanent deletion tools set `destructiveHint=true`.

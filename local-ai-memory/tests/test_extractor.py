@@ -40,6 +40,22 @@ class HeuristicExtractorTests(unittest.TestCase):
 
         self.assertEqual(memories, [])
 
+    def test_request_sentence_is_not_extracted_as_a_decision(self) -> None:
+        memories = self.extractor.extract(
+            "测试项目最终决定采用 PostgreSQL 17 作为主数据库；请只简短复述这项项目决定。",
+            "user",
+        )
+
+        self.assertEqual(len(memories), 1)
+        self.assertIn("PostgreSQL 17", memories[0].content)
+        self.assertNotIn("复述", memories[0].content)
+
+    def test_explicit_memory_request_is_not_filtered(self) -> None:
+        memories = self.extractor.extract("请记住：项目必须使用 UTC。", "user")
+
+        self.assertEqual(len(memories), 1)
+        self.assertEqual(memories[0].status, "confirmed")
+
 
 if __name__ == "__main__":
     unittest.main()

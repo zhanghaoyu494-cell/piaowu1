@@ -5,6 +5,10 @@ import unicodedata
 
 CJK_RUN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
 WORD = re.compile(r"[a-z0-9][a-z0-9_.-]{1,}")
+SEARCH_ALIASES = {
+    "时区": ("utc", "时间"),
+    "规范": ("统一",),
+}
 
 
 def normalize_text(text: str) -> str:
@@ -28,6 +32,19 @@ def search_document(text: str) -> str:
     return " ".join(search_tokens(text))
 
 
-def fts_query(text: str) -> str:
+def fts_query(text: str, operator: str = "OR", expand_aliases: bool = False) -> str:
+    if operator not in {"AND", "OR"}:
+        raise ValueError("FTS operator must be AND or OR")
+    if expand_aliases:
+        normalized = normalize_text(text)
+        alias_groups = []
+        for phrase, aliases in SEARCH_ALIASES.items():
+            if phrase in normalized:
+                escaped = [token.replace('"', '""') for token in aliases]
+                group = " OR ".join(f'"{token}"' for token in escaped)
+                alias_groups.append(f"({group})" if len(escaped) > 1 else group)
+        return f" {operator} ".join(alias_groups)
     tokens = search_tokens(text)
-    return " OR ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
+    return f" {operator} ".join(
+        f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens
+    )

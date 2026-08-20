@@ -25,9 +25,14 @@ SECRET_PATTERNS = (
     ),
     re.compile(r"\b(?:sk|pk)-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b", re.IGNORECASE),
+    re.compile(r"\b(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}\b"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*"),
     re.compile(
         r"(?i)\b(?:api[_-]?key|access[_-]?token|secret|password|passwd)\b\s*[:=]\s*[^\s,;]{6,}"
+    ),
+    re.compile(
+        r"(?:访问令牌|密码|口令|密钥|令牌|私钥)"
+        r"(?:\s*[:：=＝]\s*|\s+)[A-Za-z0-9._~+/@:=\-]{6,}"
     ),
 )
 
@@ -163,7 +168,9 @@ class RawMessageCipher:
             return cls(key)
 
         if last_read_error is not None:
-            raise ValueError("Master key file did not become readable") from last_read_error
+            raise ValueError(
+                "Master key file did not become readable"
+            ) from last_read_error
         raise TimeoutError("Timed out waiting for concurrent master key creation")
 
     def encrypt(self, text: str) -> bytes:

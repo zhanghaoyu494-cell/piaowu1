@@ -70,11 +70,17 @@ ASSISTANT_PROCESS = re.compile(
 INCOMPLETE_INTRODUCTION = re.compile(r"[:：]\s*$")
 
 
+REQUEST_ONLY = re.compile(
+    r"^(?:请(?:只)?(?:简短)?(?:复述|总结|解释|检查|分析|看看)|(?:请)?告诉我|是否)",
+    re.IGNORECASE,
+)
+
+
 class HeuristicExtractor:
     def extract(self, content: str, role: str) -> list[MemoryCandidate]:
         candidates = []
         in_code_block = False
-        segments = re.split(r"[\r\n]+|(?<=[。！？!?])", content)
+        segments = re.split(r"[\r\n]+|(?<=[\u3002\uff01\uff1f!?;\uff1b])", content)
         for segment in segments:
             stripped = segment.strip(" \t-*#>").replace("**", "").strip()
             if "```" in stripped:
@@ -83,6 +89,10 @@ class HeuristicExtractor:
             if (
                 in_code_block
                 or len(stripped) < 6
+                or (
+                    not EXPLICIT_MEMORY.search(stripped)
+                    and REQUEST_ONLY.search(stripped)
+                )
                 or len(stripped) > 600
                 or NOISE.match(stripped)
                 or INCOMPLETE_INTRODUCTION.search(stripped)

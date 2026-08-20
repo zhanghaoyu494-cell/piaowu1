@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 import threading
 from datetime import datetime
-from pathlib import Path
 
 from .service import MemoryService
 
 LAST_RUN_KEY = "nightly_consolidation_date"
-WINDOWS_TASK_NAME = "LocalAIMemoryNightly"
 
 
 class NightlyScheduler:
@@ -48,38 +43,3 @@ class NightlyScheduler:
         while not stopper.is_set():
             self.run_pending()
             stopper.wait(self.poll_seconds)
-
-
-def install_windows_task(hour: int = 3, minute: int = 0) -> None:
-    if os.name != "nt":
-        raise RuntimeError(
-            "Windows Task Scheduler installation is only available on Windows"
-        )
-    task_time = f"{hour:02d}:{minute:02d}"
-    task_command = f'"{Path(sys.executable).resolve()}" -m local_ai_memory consolidate'
-    subprocess.run(
-        [
-            "schtasks",
-            "/Create",
-            "/TN",
-            WINDOWS_TASK_NAME,
-            "/TR",
-            task_command,
-            "/SC",
-            "DAILY",
-            "/ST",
-            task_time,
-            "/RL",
-            "LIMITED",
-            "/F",
-        ],
-        check=True,
-    )
-
-
-def uninstall_windows_task() -> None:
-    if os.name != "nt":
-        raise RuntimeError(
-            "Windows Task Scheduler removal is only available on Windows"
-        )
-    subprocess.run(["schtasks", "/Delete", "/TN", WINDOWS_TASK_NAME, "/F"], check=True)

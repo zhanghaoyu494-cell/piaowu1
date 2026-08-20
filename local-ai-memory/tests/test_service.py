@@ -8,7 +8,7 @@ from pathlib import Path
 
 from local_ai_memory.config import Settings
 from local_ai_memory.scheduler import LAST_RUN_KEY, NightlyScheduler
-from local_ai_memory.service import MemoryService
+from local_ai_memory.service import MAX_SEARCHABLE_MEMORY_LENGTH, MemoryService
 
 
 class MemoryServiceTests(unittest.TestCase):
@@ -31,6 +31,31 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(results[0]["status"], "confirmed")
         with self.assertRaises(ValueError):
             self.service.remember("密码 password=super-secret-value")
+
+    def test_remember_rejects_additional_secret_formats_without_plaintext(self) -> None:
+        secrets = (
+            "AKIAIOSFODNN7EXAMPLE",
+            "数据库密码：example-value-123456",
+        )
+        for secret in secrets:
+            with (
+                self.subTest(secret=secret),
+                self.assertRaisesRegex(ValueError, "detected secret"),
+            ):
+                self.service.remember(secret)
+        database_bytes = b"".join(
+            path.read_bytes()
+            for path in self.home.glob("memory.sqlite3*")
+            if path.is_file()
+        )
+        for secret in secrets:
+            self.assertNotIn(secret.encode(), database_bytes)
+
+    def test_remember_enforces_searchable_memory_length_boundary(self) -> None:
+        accepted = "a" * MAX_SEARCHABLE_MEMORY_LENGTH
+        self.assertEqual(self.service.remember(accepted)["content"], accepted)
+        with self.assertRaisesRegex(ValueError, "at most"):
+            self.service.remember("b" * (MAX_SEARCHABLE_MEMORY_LENGTH + 1))
 
     def test_remember_validates_kind_and_sensitivity(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported memory kind"):
@@ -61,11 +86,11 @@ class MemoryServiceTests(unittest.TestCase):
     def test_delete_memory_removes_plaintext_from_database_files(self) -> None:
         marker = "LAM-SECURE-DELETE-MARKER-20260819"
         with self.service.database.connect() as connection:
-            self.assertEqual(connection.execute("PRAGMA secure_delete").fetchone()[0], 1)
+            self.assertEqual(
+                connection.execute("PRAGMA secure_delete").fetchone()[0], 1
+            )
             fts_config = dict(
-                connection.execute(
-                    "SELECT k, v FROM memories_fts_config"
-                ).fetchall()
+                connection.execute("SELECT k, v FROM memories_fts_config").fetchall()
             )
         self.assertEqual(fts_config.get("secure-delete"), 1)
         memory = self.service.remember(marker, kind="fact")
@@ -78,7 +103,25 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertNotIn(marker.encode(), database_bytes)
         self.assertEqual(self.service.search(marker), [])
 
-    def test_delete_conversation_removes_raw_plaintext_from_database_files(self) -> None:
+    def test_delete_memory_compacts_fts_segments(self) -> None:
+        marker = "LAM-FTS-SEGMENT-CLEANUP-20260819-" + ("X" * 256)
+        memory = self.service.remember(marker, kind="fact")
+        with self.service.database.transaction() as connection:
+            connection.execute(
+                "UPDATE memories SET content = content || ' updated' WHERE id = ?",
+                (memory["id"],),
+            )
+        self.assertTrue(self.service.delete_memory(memory["id"]))
+        database_bytes = b"".join(
+            path.read_bytes()
+            for path in self.home.glob("memory.sqlite3*")
+            if path.is_file()
+        )
+        self.assertNotIn(marker.encode(), database_bytes)
+
+    def test_delete_conversation_removes_raw_plaintext_from_database_files(
+        self,
+    ) -> None:
         raw_marker = "LAM-RAW-DELETE-MARKER-20260819"
         import_path = Path(self.temporary_directory.name) / "delete-test.json"
         import_path.write_text(
@@ -246,6 +289,92 @@ class MemoryServiceTests(unittest.TestCase):
         memories = self.service.search("Codex 原始任务", project="project-1")
         self.assertEqual(len(memories), 1)
         self.assertEqual(memories[0]["sources"][0]["source"], "codex")
+
+        conversation_id = self.service.list_conversations(source="codex")[0]["id"]
+        deletion = self.service.delete_conversation(conversation_id)
+        self.assertTrue(deletion["deleted"])
+        self.assertTrue(deletion["codex_sync_state_reset"])
+        replanned = self.service.codex_sync_plan([thread_summary])
+        self.assertEqual(replanned["pending_count"], 1)
+        self.assertEqual(replanned["pending"][0]["reason"], "new")
+
+    def test_near_duplicate_user_and_assistant_candidates_share_one_memory(
+        self,
+    ) -> None:
+        import_path = Path(self.temporary_directory.name) / "near-duplicate.json"
+        import_path.write_text(
+            json.dumps(
+                {
+                    "id": "near-duplicate",
+                    "messages": [
+                        {
+                            "id": "user-decision",
+                            "role": "user",
+                            "content": "项目最终决定采用 PostgreSQL 17 作为主数据库。",
+                        },
+                        {
+                            "id": "assistant-decision",
+                            "role": "assistant",
+                            "content": "最终决定采用 PostgreSQL 17 作为项目主数据库。",
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        self.service.import_file(import_path, "codex", "duplicate-project")
+        candidates = self.service.list_candidates("duplicate-project")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["source_authority"], "user")
+        self.assertEqual(len(candidates[0]["sources"]), 2)
+
+    def test_user_candidate_replaces_an_earlier_assistant_paraphrase(self) -> None:
+        import_path = Path(self.temporary_directory.name) / "authority-duplicate.json"
+        user_content = "项目最终决定采用 PostgreSQL 17 作为主数据库。"
+        import_path.write_text(
+            json.dumps(
+                {
+                    "id": "authority-duplicate",
+                    "messages": [
+                        {
+                            "id": "assistant-first",
+                            "role": "assistant",
+                            "content": "最终决定采用 PostgreSQL 17 作为项目主数据库。",
+                        },
+                        {
+                            "id": "user-second",
+                            "role": "user",
+                            "content": user_content,
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        self.service.import_file(import_path, "codex", "authority-project")
+        candidates = self.service.list_candidates("authority-project")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["content"], user_content)
+        self.assertEqual(candidates[0]["source_authority"], "user")
+        self.assertEqual(len(candidates[0]["sources"]), 2)
+
+    def test_search_prefers_all_tokens_then_falls_back_to_any_token(self) -> None:
+        exact = self.service.remember(
+            "所有时间字段统一使用 UTC。", project="search-project"
+        )
+        self.service.remember("所有缓存字段统一使用 Redis。", project="search-project")
+
+        focused = self.service.search("时间字段 UTC", project="search-project")
+        self.assertEqual([item["id"] for item in focused], [exact["id"]])
+        fallback = self.service.search("时区规范", project="search-project")
+        self.assertEqual([item["id"] for item in fallback], [exact["id"]])
+        self.assertEqual(
+            self.service.search('" : ( ) OR *', project="search-project"), []
+        )
 
     def test_codex_multipage_sync_requires_newest_page(self) -> None:
         base_thread = {

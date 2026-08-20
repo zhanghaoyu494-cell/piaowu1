@@ -149,6 +149,13 @@ class Database:
 
     def secure_cleanup(self) -> None:
         with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO memories_fts(memories_fts) VALUES ('optimize')"
+            )
+            connection.execute("PRAGMA optimize")
+        with self.connect() as connection:
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        with self.connect() as connection:
             connection.execute("VACUUM")
+        with self.connect() as connection:
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")

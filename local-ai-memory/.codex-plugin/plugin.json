@@ -1,6 +1,6 @@
 {
   "name": "local-ai-memory",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Synchronize and search prior Codex tasks with a local encrypted memory cache.",
   "author": {
     "name": "Local AI Memory contributors"

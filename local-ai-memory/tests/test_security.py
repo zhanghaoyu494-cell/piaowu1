@@ -27,6 +27,19 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("[REDACTED_EMAIL]", result.text)
         self.assertIn("[REDACTED_PHONE]", result.text)
 
+    def test_redaction_detects_aws_and_chinese_labeled_secrets(self) -> None:
+        for content in (
+            "AKIAIOSFODNN7EXAMPLE",
+            "ASIAIOSFODNN7EXAMPLE",
+            "数据库密码：example-value-123456",
+            "访问令牌 = example-token-value-123456",
+        ):
+            with self.subTest(content=content):
+                result = redact_sensitive(content)
+                self.assertTrue(result.secret_detected)
+                self.assertEqual(result.sensitivity, "high")
+                self.assertNotIn(content, result.text)
+
     def test_concurrent_first_use_creates_one_master_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             key_path = Path(directory) / "key"

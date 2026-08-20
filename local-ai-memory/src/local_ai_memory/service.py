@@ -14,12 +14,15 @@ from .database import Database
 from .extractor import HeuristicExtractor, MemoryCandidate
 from .ingestion import ImportedConversation, load_conversations
 from .security import RawMessageCipher, content_hash, redact_sensitive
-from .text import fts_query, normalize_text, search_document
+from .text import fts_query, normalize_text, search_document, search_tokens
 
 MemoryKind = Literal["decision", "preference", "constraint", "solution", "todo", "fact"]
 Sensitivity = Literal["normal", "personal", "high"]
 MEMORY_KINDS = ("decision", "preference", "constraint", "solution", "todo", "fact")
 SENSITIVITIES = ("normal", "personal", "high")
+MAX_SEARCHABLE_MEMORY_LENGTH = 10_000
+NEAR_DUPLICATE_JACCARD = 0.72
+NEAR_DUPLICATE_OVERLAP = 0.82
 
 
 def utc_now() -> str:
@@ -301,9 +304,7 @@ class MemoryService:
         if candidate.kind not in MEMORY_KINDS:
             raise ValueError(f"Unsupported memory kind: {candidate.kind}")
         if candidate.sensitivity not in SENSITIVITIES:
-            raise ValueError(
-                f"Unsupported memory sensitivity: {candidate.sensitivity}"
-            )
+            raise ValueError(f"Unsupported memory sensitivity: {candidate.sensitivity}")
         if candidate.sensitivity == "high":
             raise ValueError(
                 "Refusing to place high-sensitivity content in the searchable knowledge base"
@@ -311,9 +312,16 @@ class MemoryService:
         normalized = normalize_text(candidate.content)
         fingerprint = content_hash(f"{project}\0{candidate.kind}\0{normalized}")
         existing = connection.execute(
-            "SELECT id, confidence, status FROM memories WHERE fingerprint = ?",
+            """
+            SELECT id, content, confidence, status, sensitivity, source_authority
+            FROM memories WHERE fingerprint = ?
+            """,
             (fingerprint,),
         ).fetchone()
+        if existing is None and message_id is not None:
+            existing = self._find_near_duplicate_candidate(
+                connection, candidate.content, candidate.kind, project
+            )
         if existing:
             memory_id = existing["id"]
             status = (
@@ -321,11 +329,39 @@ class MemoryService:
                 if "confirmed" in {existing["status"], candidate.status}
                 else existing["status"]
             )
+            replace_content = candidate.confidence > existing["confidence"]
+            merged_content = (
+                candidate.content if replace_content else existing["content"]
+            )
+            merged_authority = (
+                candidate.source_authority
+                if replace_content
+                else existing["source_authority"]
+            )
+            merged_sensitivity = (
+                candidate.sensitivity if replace_content else existing["sensitivity"]
+            )
+            merged_normalized = normalize_text(merged_content)
+            merged_fingerprint = content_hash(
+                f"{project}\0{candidate.kind}\0{merged_normalized}"
+            )
             connection.execute(
-                "UPDATE memories SET confidence = ?, status = ?, updated_at = ? WHERE id = ?",
+                """
+                UPDATE memories
+                SET content = ?, normalized_content = ?, search_terms = ?,
+                    fingerprint = ?, confidence = ?, status = ?, sensitivity = ?,
+                    source_authority = ?, updated_at = ?
+                WHERE id = ?
+                """,
                 (
+                    merged_content,
+                    merged_normalized,
+                    search_document(merged_content),
+                    merged_fingerprint,
                     max(existing["confidence"], candidate.confidence),
                     status,
+                    merged_sensitivity,
+                    merged_authority,
                     utc_now(),
                     memory_id,
                 ),
@@ -368,6 +404,40 @@ class MemoryService:
             )
         return added
 
+    def _find_near_duplicate_candidate(
+        self,
+        connection: sqlite3.Connection,
+        content: str,
+        kind: str,
+        project: str,
+    ) -> sqlite3.Row | None:
+        candidate_tokens = set(search_tokens(content))
+        if len(candidate_tokens) < 4:
+            return None
+        rows = connection.execute(
+            """
+            SELECT id, content, confidence, status, sensitivity, source_authority
+            FROM memories
+            WHERE project = ? AND kind = ? AND status IN ('candidate', 'confirmed')
+            """,
+            (project, kind),
+        ).fetchall()
+        best: sqlite3.Row | None = None
+        best_score = 0.0
+        for row in rows:
+            existing_tokens = set(search_tokens(row["content"]))
+            if len(existing_tokens) < 4:
+                continue
+            common = candidate_tokens & existing_tokens
+            jaccard = len(common) / len(candidate_tokens | existing_tokens)
+            overlap = len(common) / min(len(candidate_tokens), len(existing_tokens))
+            if (
+                jaccard >= NEAR_DUPLICATE_JACCARD or overlap >= NEAR_DUPLICATE_OVERLAP
+            ) and max(jaccard, overlap) > best_score:
+                best = row
+                best_score = max(jaccard, overlap)
+        return best
+
     def remember(
         self,
         content: str,
@@ -378,6 +448,10 @@ class MemoryService:
         content = content.strip()
         if not content:
             raise ValueError("Memory content cannot be empty")
+        if len(content) > MAX_SEARCHABLE_MEMORY_LENGTH:
+            raise ValueError(
+                f"Memory content must contain at most {MAX_SEARCHABLE_MEMORY_LENGTH} characters"
+            )
         if kind not in MEMORY_KINDS:
             raise ValueError(f"Unsupported memory kind: {kind}")
         if sensitivity is not None and sensitivity not in SENSITIVITIES:
@@ -422,43 +496,57 @@ class MemoryService:
         limit: int = 5,
         include_candidates: bool = False,
     ) -> list[dict[str, Any]]:
-        match = fts_query(query)
-        if not match:
+        queries = []
+        for candidate_query in (
+            fts_query(query, operator="AND"),
+            fts_query(query, operator="AND", expand_aliases=True),
+            fts_query(query, operator="OR"),
+        ):
+            if candidate_query and candidate_query not in queries:
+                queries.append(candidate_query)
+        if not queries:
             return []
-        statuses = ("confirmed", "candidate") if include_candidates else ("confirmed",)
-        placeholders = ",".join("?" for _ in statuses)
-        parameters: list[Any] = [match, *statuses]
-        project_clause = ""
-        if project is not None:
-            project_clause = " AND m.project = ?"
-            parameters.append(project)
-        parameters.append(max(1, min(limit, 50)))
-        sql = f"""
+        sql = """
             SELECT m.*, bm25(memories_fts, 4.0, 1.5, 0.5, 0.5) AS fts_rank
             FROM memories_fts
             JOIN memories m ON m.rowid = memories_fts.rowid
             WHERE memories_fts MATCH ?
-              AND m.status IN ({placeholders})
-              {project_clause}
+              AND (m.status = 'confirmed' OR (? = 1 AND m.status = 'candidate'))
+              AND (? IS NULL OR m.project = ?)
             ORDER BY fts_rank ASC, m.confidence DESC, m.updated_at DESC
             LIMIT ?
         """
+        bounded_limit = max(1, min(limit, 50))
         with self.database.connect() as connection:
-            rows = connection.execute(sql, parameters).fetchall()
+            rows = []
+            for match in queries:
+                rows = connection.execute(
+                    sql,
+                    (
+                        match,
+                        int(include_candidates),
+                        project,
+                        project,
+                        bounded_limit,
+                    ),
+                ).fetchall()
+                if rows:
+                    break
         return [self._memory_dict(row, include_sources=True) for row in rows]
 
     def list_candidates(
         self, project: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM memories WHERE status = 'candidate'"
-        parameters: list[Any] = []
-        if project is not None:
-            sql += " AND project = ?"
-            parameters.append(project)
-        sql += " ORDER BY confidence DESC, created_at DESC LIMIT ?"
-        parameters.append(max(1, min(limit, 200)))
         with self.database.connect() as connection:
-            rows = connection.execute(sql, parameters).fetchall()
+            rows = connection.execute(
+                """
+                SELECT * FROM memories
+                WHERE status = 'candidate' AND (? IS NULL OR project = ?)
+                ORDER BY confidence DESC, created_at DESC
+                LIMIT ?
+                """,
+                (project, project, max(1, min(limit, 200))),
+            ).fetchall()
         return [self._memory_dict(row, include_sources=True) for row in rows]
 
     def get_memory(self, memory_id: str) -> dict[str, Any]:
@@ -564,35 +652,30 @@ class MemoryService:
     def list_conversations(
         self, source: str | None = None, project: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
-        clauses = []
-        parameters: list[Any] = []
-        if source is not None:
-            clauses.append("c.source = ?")
-            parameters.append(source)
-        if project is not None:
-            clauses.append("c.project = ?")
-            parameters.append(project)
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        parameters.append(max(1, min(limit, 500)))
         with self.database.connect() as connection:
             rows = connection.execute(
-                f"""
+                """
                 SELECT c.id, c.source, c.external_id, c.project, c.title,
                        c.source_uri, c.created_at, c.updated_at, c.imported_at,
                        COUNT(m.id) AS message_count
                 FROM conversations c
                 LEFT JOIN messages m ON m.conversation_id = c.id
-                {where}
+                WHERE (? IS NULL OR c.source = ?)
+                  AND (? IS NULL OR c.project = ?)
                 GROUP BY c.id
                 ORDER BY c.updated_at DESC
                 LIMIT ?
                 """,
-                parameters,
+                (source, source, project, project, max(1, min(limit, 500))),
             ).fetchall()
         return [dict(row) for row in rows]
 
     def delete_conversation(self, conversation_id: str) -> dict[str, int | bool]:
         with self.database.transaction() as connection:
+            conversation = connection.execute(
+                "SELECT source, external_id FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
             linked_memory_ids = [
                 row["memory_id"]
                 for row in connection.execute(
@@ -612,6 +695,15 @@ class MemoryService:
             deleted = connection.execute(
                 "DELETE FROM conversations WHERE id = ?", (conversation_id,)
             ).rowcount
+            codex_sync_state_reset = False
+            if deleted and conversation and conversation["source"] == "codex":
+                version_key = f"codex_thread_version:{conversation['external_id']}"
+                progress_key = f"codex_sync_progress:{conversation['external_id']}"
+                connection.execute(
+                    "DELETE FROM settings WHERE key IN (?, ?)",
+                    (version_key, progress_key),
+                )
+                codex_sync_state_reset = True
             orphaned_deleted = 0
             for memory_id in linked_memory_ids:
                 orphaned_deleted += connection.execute(
@@ -628,6 +720,7 @@ class MemoryService:
             "deleted": bool(deleted),
             "messages_deleted": message_count if deleted else 0,
             "orphaned_memories_deleted": orphaned_deleted,
+            "codex_sync_state_reset": codex_sync_state_reset,
         }
         if deleted:
             self.database.secure_cleanup()
